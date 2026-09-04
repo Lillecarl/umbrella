@@ -378,13 +378,16 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
         for name in backend_workspaces(umbrella, backend):
             print(f"  wts {name}")
         return 0
-    print(f"{'SUBMODULE':<12} {'HEAD':<10} STATE")
-    for sub in umbrella.subs():
+    subs = umbrella.subs()
+    # A name wider than the column would push every later field out of line.
+    width = max([len("SUBMODULE")] + [len(sub.path) for sub in subs])
+    print(f"{'SUBMODULE':<{width}} {'HEAD':<10} STATE")
+    for sub in subs:
         if not sub.present:
-            print(f"{sub.path:<12} {'-':<10} not checked out (run: umbrella initgit)")
+            print(f"{sub.path:<{width}} {'-':<10} not checked out (run: umbrella initgit)")
             continue
         if backend.mode is Mode.JJ and not sub.colocated:
-            print(f"{sub.path:<12} {'-':<10} not colocated (run: umbrella initjj)")
+            print(f"{sub.path:<{width}} {'-':<10} not colocated (run: umbrella initjj)")
             continue
         head = sub.head()
         notes = []
@@ -402,10 +405,10 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
             if moved is not None:
                 notes.append(f"{moved}-moved-ahead")
         short = str(head)[:8] if head else "-"
-        print(f"{sub.path:<12} {short:<10} {' '.join(notes) or 'in sync'}")
+        print(f"{sub.path:<{width}} {short:<10} {' '.join(notes) or 'in sync'}")
         if head is not None:
             for name in backend.elsewhere(sub, head):
-                print(f"{'':<12} {'':<10} workspace {name} holds work this "
+                print(f"{'':<{width}} {'':<10} workspace {name} holds work this "
                       "checkout cannot see")
     return 0
 

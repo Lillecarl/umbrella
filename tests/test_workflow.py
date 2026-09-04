@@ -346,3 +346,26 @@ def test_status_says_nothing_about_a_workspace_with_no_unseen_work(
     assert "cannot see" not in capsys.readouterr().out
 
 
+
+
+def test_status_lines_up_when_a_name_is_long(
+    lab: Lab, git_checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A submodule called prompt-toolkit is wider than the old fixed column."""
+    long_name = "a-rather-long-submodule-name"
+    run(
+        "git", "submodule", "add", "-q", str(lab.origin("sub1")), long_name,
+        cwd=git_checkout.path,
+    )
+    run("git", "commit", "-qm", "add a long name", cwd=git_checkout.path)
+
+    assert git_checkout.cli("status") == 0
+
+    lines = [l for l in capsys.readouterr().out.splitlines() if " in sync" in l or "HEAD" in l]
+    heads = {l.index("HEAD") for l in lines if "HEAD" in l}
+    assert len(heads) == 1
+    column = heads.pop()
+    for line in lines:
+        if "HEAD" not in line:
+            # every row's second field starts in the same place
+            assert line[column - 1] == " "
