@@ -367,6 +367,44 @@ def test_update_clears_the_row_that_status_shows(
     assert "lock-names" not in capsys.readouterr().out
 
 
+def test_land_names_the_source_whose_lock_it_left_behind(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """land is what creates the drift, so it is where saying so costs least."""
+    lock.write(checkout.path, {"sub1": node(checkout.recorded("sub1"))})
+    checkout.edit("sub1", "v2")
+    checkout.commit("sub1", "v2")
+
+    assert checkout.cli("land", "-m", "bump sub1") == 0
+
+    out = capsys.readouterr().out
+    assert "umbrella update sub1" in out
+
+
+def test_land_says_nothing_when_there_is_no_lock(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    checkout.edit("sub1", "v2")
+    checkout.commit("sub1", "v2")
+
+    assert checkout.cli("land", "-m", "bump sub1") == 0
+
+    assert "umbrella update" not in capsys.readouterr().out
+
+
+def test_land_says_nothing_when_the_lock_keeps_up(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A lock already naming the commit being landed is not a drift."""
+    checkout.edit("sub1", "v2")
+    head = checkout.commit("sub1", "v2")
+    lock.write(checkout.path, {"sub1": node(head)})
+
+    assert checkout.cli("land", "-m", "bump sub1") == 0
+
+    assert "umbrella update" not in capsys.readouterr().out
+
+
 def test_update_needs_a_specification(
     checkout: Checkout, capsys: pytest.CaptureFixture[str]
 ) -> None:

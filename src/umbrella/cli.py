@@ -537,6 +537,31 @@ def cmd_sync(umbrella: Umbrella, backend: Backend, _args) -> int:
     return 0
 
 
+def _lock_after_land(umbrella: Umbrella, landed: dict[str, Oid]) -> str | None:
+    """What the lock still names, once land has moved a pointer.
+
+    land publishes a commit and records it. It does not touch the lock, and
+    nothing else will either. `status` reports the pair afterwards; saying it
+    here saves the round trip, and names the exact command that ends it.
+
+    A lock nobody can read is not worth failing over at this point. The push
+    already happened, so an exit code here would say the wrong thing.
+    """
+    try:
+        locked = lock.read(umbrella.workdir)
+    except UmbrellaError as error:
+        return f"\n  {error}"
+    stale = sorted(
+        name for name, oid in landed.items() if name in locked and locked[name] != oid
+    )
+    if not stale:
+        return None
+    return (
+        f"\n  {lock.PATH} still names another commit for {', '.join(stale)}.\n"
+        f"  Run: umbrella update {' '.join(stale)}"
+    )
+
+
 def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
     if umbrella.kind is not Kind.UMBRELLA:
         _die("this is a single project. There are no submodule pointers to land.")
@@ -549,7 +574,7 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
     if args.push and not args.message:
         _die("land: --push needs -m, because it pushes the commit it makes")
 
-    staged = False
+    landed: dict[str, Oid] = {}
     for sub in umbrella.subs():
         if not sub.present:
             _die(f"{sub.path} is not checked out. Run: umbrella initgit")
@@ -583,13 +608,16 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
         backend.push(sub, choice.name)
         umbrella.stage_gitlink(sub, head)
         print(f"{sub.path:<{PATH_COLUMN}} pushed {choice.name}, staged {str(head)[:SHORT_ID]}")
-        staged = True
+        landed[sub.source] = head
 
-    if not staged:
+    if not landed:
         print("nothing to land")
         return 0
+    note = _lock_after_land(umbrella, landed)
     if not args.message:
         print("umbrella: staged. Commit with git commit, or rerun with -m.")
+        if note:
+            print(note)
         return 0
 
     umbrella.commit(args.message)
@@ -597,6 +625,8 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
     if args.push:
         gitcli.push(umbrella.workdir)
         print("umbrella: pushed")
+    if note:
+        print(note)
     return 0
 
 
