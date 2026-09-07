@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 import pygit2
 from pygit2 import Oid, Repository
 
+from . import skip
 from .kind import Kind
 from pygit2.enums import FileMode, RepositoryOpenFlag
 
@@ -56,6 +57,9 @@ class Sub:
     workdir: Path
     recorded: Oid | None
     declared: str | None   # submodule.<name>.branch from .gitmodules
+    # This checkout leaves it to the lock. See skip.py: it changes what the
+    # tool does, and nothing about how a source resolves.
+    skipped: bool = False
 
     @property
     def source(self) -> str:
@@ -185,6 +189,7 @@ class Umbrella:
         if self.kind is not Kind.UMBRELLA:
             return []
         tree = self.head_tree() if revision is None else self.tree_at(revision)
+        left = skip.read(self.repo)
         out = []
         for sub in self.repo.submodules:
             out.append(
@@ -195,6 +200,7 @@ class Umbrella:
                     workdir=self.workdir / sub.path,
                     recorded=_tree_gitlink(tree, sub.path),
                     declared=self._declared_branch(sub.branch),
+                    skipped=sub.path in left,
                 )
             )
         return sorted(out, key=lambda s: s.path)

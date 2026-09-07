@@ -12,7 +12,21 @@ from pathlib import Path
 from pygit2 import Oid
 
 from . import backend as backends
-from . import gitcli, guards, hooks, initcc, jj, kind, lock, mode, nixcli, refs, update, wts
+from . import (
+    gitcli,
+    guards,
+    hooks,
+    initcc,
+    jj,
+    kind,
+    lock,
+    mode,
+    nixcli,
+    refs,
+    skip,
+    update,
+    wts,
+)
 from .backend import Backend
 from .kind import Kind
 from .mode import Mode
@@ -59,11 +73,17 @@ def _hints(backend: Backend, subs: list[Sub]) -> None:
 
 
 def _clone_missing(umbrella: Umbrella) -> None:
-    """Check out only the submodules that are not there yet."""
-    missing = [s.path for s in umbrella.subs() if not s.present]
+    """Check out only the submodules that are not there yet, and not skipped."""
+    missing = [s.path for s in umbrella.subs() if not s.present and not s.skipped]
     gitcli.submodule_clone(umbrella.workdir, missing)
     for path in missing:
         print(f"{path:<{PATH_COLUMN}} checked out")
+    for sub in umbrella.subs():
+        if sub.skipped and not sub.present:
+            print(
+                f"{sub.path:<{PATH_COLUMN}} left to the lock "
+                f"(umbrella skip --rm {sub.path})"
+            )
 
 
 def _install(umbrella: Umbrella) -> None:
@@ -124,6 +144,8 @@ def cmd_initjj(umbrella: Umbrella, _backend: Backend, _args) -> int:
             print(f"tracking {bookmark}")
 
     for sub in umbrella.subs():
+        if not sub.present:
+            continue  # skipped, and _clone_missing already said so
         if sub.colocated:
             print(f"{sub.path:<{PATH_COLUMN}} already colocated")
         else:
@@ -144,7 +166,8 @@ def cmd_mode(umbrella: Umbrella, _backend: Backend, args) -> int:
         return 0
     chosen = Mode(args.value)
     if chosen is Mode.JJ:
-        missing = [s.path for s in umbrella.subs() if not s.colocated]
+        # A submodule this checkout leaves to the lock has nothing to colocate.
+        missing = [s.path for s in umbrella.subs() if s.present and not s.colocated]
         if missing:
             _die(f"not colocated yet: {', '.join(missing)}. Run: umbrella initjj")
     mode.write(umbrella.repo, chosen)
@@ -187,11 +210,17 @@ def _create(
     wts.write(made.repo, name)
     mode.write(made.repo, backend.mode)
     kind.write(made.repo, Kind.UMBRELLA)
+    # A worktreespace is one more working copy of this checkout, so it holds
+    # the same opinion about which submodules this checkout does not want.
+    skip.write(made.repo, skip.read(umbrella.repo))
     hooks.install(made.repo)
 
     # The pointers come from the commit being checked out, not from HEAD, so
     # a worktreespace of an older umbrella gets the submodules of that day.
     for sub in umbrella.subs(revision):
+        if sub.skipped:
+            log(f"{sub.path:<12} left to the lock, as in the checkout it came from")
+            continue
         if sub.recorded is None or not sub.present:
             log(f"{sub.path:<{PATH_COLUMN}} skipped, nothing recorded to check out")
             continue
@@ -204,7 +233,7 @@ def _create(
 def _destroy(umbrella: Umbrella, backend: Backend, name: str, path: Path) -> None:
     if umbrella.kind is Kind.UMBRELLA:
         for sub in umbrella.subs():
-            if not sub.present:
+            if sub.skipped or not sub.present:
                 continue
             try:
                 backend.drop_working_copy(sub.workdir, path / sub.path, name)
@@ -427,10 +456,14 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
         drifted = drifted or stale is not None
         trailer = f" {stale}" if stale else ""
         if not sub.present:
-            print(
-                f"{sub.path:<{width}} {'-':<{HEAD_COLUMN}} not checked out "
-                f"(run: umbrella initgit){trailer}"
+            # A skipped one is not missing. It is where this checkout wants it,
+            # and the lock is what answers for it.
+            what = (
+                "from the lock"
+                if sub.skipped
+                else "not checked out (run: umbrella initgit)"
             )
+            print(f"{sub.path:<{width}} {'-':<{HEAD_COLUMN}} {what}{trailer}")
             continue
         if backend.mode is Mode.JJ and not sub.colocated:
             print(
@@ -440,6 +473,10 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
             continue
         head = sub.head()
         notes = []
+        if sub.skipped:
+            # The marker tells the tool to leave it alone. It tells Nix
+            # nothing, and Nix reads a working copy before it reads the lock.
+            notes.append("skipped-but-checked-out")
         if backend.conflicted(sub):
             notes.append("CONFLICT")
         if backend.dirty(sub):
@@ -470,6 +507,56 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
             "  Nix cannot see the pointer, so neither of them reports this on "
             "its own."
         )
+    return 0
+
+
+def cmd_skip(umbrella: Umbrella, _backend: Backend, args) -> int:
+    """Show or change which submodules this checkout leaves to the lock."""
+    if umbrella.kind is not Kind.UMBRELLA:
+        _die("this is a single project. There are no submodules to leave out.")
+    subs = {sub.path: sub for sub in umbrella.subs()}
+    left = skip.read(umbrella.repo)
+
+    if not args.paths:
+        if not left:
+            print("nothing is skipped. Every submodule is checked out here.")
+            return 0
+        for path in sorted(left):
+            sub = subs.get(path)
+            if sub is None:
+                print(f"{path:<12} no longer a submodule (umbrella skip --rm {path})")
+            elif sub.present:
+                print(f"{path:<12} skipped, but checked out, so Nix reads it anyway")
+            else:
+                print(f"{path:<12} left to the lock")
+        return 0
+
+    unknown = [path for path in args.paths if path not in subs]
+    if unknown and not args.rm:
+        _die(f"not a submodule of this umbrella: {', '.join(sorted(unknown))}")
+
+    if args.rm:
+        skip.write(umbrella.repo, left - set(args.paths))
+        for path in args.paths:
+            if path in subs and not subs[path].present:
+                print(f"{path:<12} no longer skipped (run: umbrella initgit)")
+            else:
+                print(f"{path:<12} no longer skipped")
+        return 0
+
+    # A working copy wins over the lock, whatever this marker says. Skipping a
+    # submodule that is checked out would change nothing about what gets built,
+    # so it is refused rather than quietly recorded.
+    present = [path for path in args.paths if subs[path].present]
+    if present:
+        _die(
+            f"{', '.join(sorted(present))}: checked out here, and Nix reads a "
+            "working copy before the lock. Remove the directory contents first, "
+            "then skip it."
+        )
+    skip.write(umbrella.repo, left | set(args.paths))
+    for path in sorted(set(args.paths)):
+        print(f"{path:<12} left to the lock")
     return 0
 
 
@@ -515,6 +602,9 @@ def cmd_sync(umbrella: Umbrella, backend: Backend, _args) -> int:
     if umbrella.kind is not Kind.UMBRELLA:
         _die("this is a single project. There are no submodule pointers to sync.")
     for sub in umbrella.subs():
+        if sub.skipped and not sub.present:
+            print(f"{sub.path:<12} left to the lock")
+            continue
         if not sub.present:
             _die(f"{sub.path} is not checked out. Run: umbrella initgit")
         backend.fetch(sub)
@@ -576,6 +666,11 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
 
     landed: dict[str, Oid] = {}
     for sub in umbrella.subs():
+        # A skipped one has nothing to land, and it must not stop the others.
+        # Refusing here would mean that leaving one submodule out made every
+        # other one unlandable.
+        if sub.skipped and not sub.present:
+            continue
         if not sub.present:
             _die(f"{sub.path} is not checked out. Run: umbrella initgit")
         if not args.no_advance and backend.finalize(sub):
@@ -690,6 +785,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("sync", help="move submodules onto the recorded pointers")
 
+    skipper = sub.add_parser(
+        "skip",
+        help="leave a submodule out of this checkout, and take it from the lock",
+        description=(
+            "A source with no working copy resolves from nix/sources.lock, so "
+            "it costs a store path and no checkout. This says which submodules "
+            "to leave that way: initgit does not clone them, and sync and land "
+            "step over them. It changes nothing about how a source resolves -- "
+            "Nix reads a working copy before the lock whatever this says, which "
+            "is why skipping one that is checked out is refused. The choice "
+            "lives in .git, so it is never committed and never shared. One "
+            "limit: the pre-push hook verifies a pointer by looking in the "
+            "checkout, so landing a new commit for a skipped submodule means "
+            "checking it out again first."
+        ),
+    )
+    skipper.add_argument("paths", nargs="*", help="submodule paths. None shows the list")
+    skipper.add_argument(
+        "--rm", action="store_true", help="stop skipping these instead"
+    )
+
     updater = sub.add_parser(
         "update",
         help="write nix/sources.lock from the pointers and the branches",
@@ -802,6 +918,7 @@ COMMANDS = {
     "mode": cmd_mode,
     "status": cmd_status,
     "sync": cmd_sync,
+    "skip": cmd_skip,
     "update": cmd_update,
     "land": cmd_land,
     "initcc": cmd_initcc,
