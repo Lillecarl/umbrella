@@ -12,7 +12,7 @@ from pathlib import Path
 from pygit2 import Oid
 
 from . import backend as backends
-from . import gitcli, guards, hooks, initcc, jj, kind, lock, mode, refs, wts
+from . import gitcli, guards, hooks, initcc, jj, kind, lock, mode, nixcli, refs, update, wts
 from .backend import Backend
 from .kind import Kind
 from .mode import Mode
@@ -473,6 +473,41 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
     return 0
 
 
+def cmd_update(umbrella: Umbrella, _backend: Backend, args) -> int:
+    """Write the lock again, from the pointers and the branches.
+
+    This is the answer to the `lock-names-<rev>` row of `status`.
+    """
+    workdir = umbrella.workdir
+    declared = nixcli.spec(workdir)
+    # Only a recorded pointer counts. A submodule's own HEAD is not public
+    # until a land pushes it and records it, and a lock that named it would
+    # send everybody else to a commit no remote has.
+    pointers = {
+        sub.source: str(sub.recorded)
+        for sub in umbrella.subs()
+        if sub.recorded is not None
+    }
+    sources, changes = update.rewrite(
+        spec=declared,
+        pointers=pointers,
+        existing=lock.entries(workdir),
+        head_of=lambda url, branch: gitcli.remote_head(workdir, url, branch),
+        prefetch=lambda owner, repo, rev: nixcli.prefetch(workdir, owner, repo, rev),
+        names=args.names or None,
+    )
+    if not changes:
+        print("nothing moved")
+        return 0
+    print(update.report(changes))
+    if args.dry_run:
+        print(f"\n  --dry-run, so {lock.PATH} is untouched")
+        return 0
+    written = lock.write(workdir, sources)
+    print(f"\n  wrote {written.relative_to(workdir)}")
+    return 0
+
+
 def cmd_sync(umbrella: Umbrella, backend: Backend, _args) -> int:
     note = _worktreespace_note(umbrella)
     if note is not None:
@@ -625,6 +660,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub.add_parser("sync", help="move submodules onto the recorded pointers")
 
+    updater = sub.add_parser(
+        "update",
+        help="write nix/sources.lock from the pointers and the branches",
+        description=(
+            "Each submodule is locked at the commit the umbrella records, and "
+            "every other source at the head of the branch nix/sources.nix "
+            "names. A run with no names fetches every source again and drops "
+            "any the specification no longer declares."
+        ),
+    )
+    updater.add_argument(
+        "names",
+        nargs="*",
+        help="only these sources. Everything else is left exactly as it is",
+    )
+    updater.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="say what would move, and write nothing",
+    )
+
     land = sub.add_parser("land", help="push submodules, then record their pointers")
     land.add_argument("-m", "--message", help="commit the umbrella with this message")
     land.add_argument("-p", "--push", action="store_true", help="push the umbrella too")
@@ -715,6 +772,7 @@ COMMANDS = {
     "mode": cmd_mode,
     "status": cmd_status,
     "sync": cmd_sync,
+    "update": cmd_update,
     "land": cmd_land,
     "initcc": cmd_initcc,
     "kind": cmd_kind,
@@ -742,7 +800,7 @@ def main(argv: list[str] | None = None) -> int:
         command = f"hook.{args.hook_command}"
     try:
         return COMMANDS[command](umbrella, backend, args)
-    except (jj.JjError, gitcli.GitError, UmbrellaError) as error:
+    except (jj.JjError, gitcli.GitError, nixcli.NixError, UmbrellaError) as error:
         # Every one of these carries a sentence written for the person running
         # the command. A traceback would hide it.
         _die(str(error))

@@ -54,6 +54,18 @@ def fetch(repo: Path) -> None:
     run(repo, "fetch", "--all", "--prune", "--quiet")
 
 
+def remote_head(cwd: Path, url: str, branch: str) -> str | None:
+    """Where a branch points on a remote, without cloning it.
+
+    None when the remote has no such branch. `cwd` decides nothing about the
+    answer; it only puts the command inside the checkout whose configuration
+    holds any url rewrite the user set.
+    """
+    out = capture(cwd, "ls-remote", url, f"refs/heads/{branch}")
+    first = out.split("\n", 1)[0].strip()
+    return first.split("\t", 1)[0] if first else None
+
+
 def push(umbrella: Path) -> None:
     run(umbrella, "push")
 
