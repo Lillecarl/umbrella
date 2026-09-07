@@ -7,10 +7,12 @@ import json
 import os
 import shutil
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+from pygit2 import Oid
 
 from . import backend as backends
-from . import gitcli, guards, hooks, initcc, jj, kind, mode, refs, wts
+from . import gitcli, guards, hooks, initcc, jj, kind, lock, mode, refs, wts
 from .backend import Backend
 from .kind import Kind
 from .mode import Mode
@@ -377,6 +379,24 @@ def _worktreespace_note(umbrella: Umbrella) -> str | None:
     )
 
 
+def _lock_note(locked: dict[str, Oid], sub: Sub) -> str | None:
+    """What the lock names, when that is not what the umbrella records.
+
+    The lock keys are source names and a submodule is known by its path, so the
+    two meet at the last component of the path. A name the lock does not carry
+    is not a fault: most sources in a lock are not submodules at all.
+
+    This says which commit the lock names and does not say which of the two is
+    wrong. Either can be: a `land` that moved the pointer leaves the lock
+    behind, and a lock written from a newer revision runs ahead of it.
+    """
+    name = PurePosixPath(sub.path).name
+    rev = locked.get(name)
+    if rev is None or rev == sub.recorded:
+        return None
+    return f"lock-names-{str(rev)[:8]}"
+
+
 def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
     note = _worktreespace_note(umbrella)
     if note is not None:
@@ -394,15 +414,30 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
             print(f"  wts {name}")
         return 0
     subs = umbrella.subs()
+    # The lock file is read once, and every row below asks it the same
+    # question. It needs no checkout, so it answers for a submodule that is
+    # not there -- which is the whole of a pinned checkout, where the lock is
+    # the only thing that decides anything.
+    locked = lock.read(umbrella.workdir)
+    drifted = False
     # A name wider than the column would push every later field out of line.
     width = max([len("SUBMODULE")] + [len(sub.path) for sub in subs])
     print(f"{'SUBMODULE':<{width}} {'HEAD':<{HEAD_COLUMN}} STATE")
     for sub in subs:
+        stale = _lock_note(locked, sub)
+        drifted = drifted or stale is not None
+        trailer = f" {stale}" if stale else ""
         if not sub.present:
-            print(f"{sub.path:<{width}} {'-':<{HEAD_COLUMN}} not checked out (run: umbrella initgit)")
+            print(
+                f"{sub.path:<{width}} {'-':<{HEAD_COLUMN}} not checked out "
+                f"(run: umbrella initgit){trailer}"
+            )
             continue
         if backend.mode is Mode.JJ and not sub.colocated:
-            print(f"{sub.path:<{width}} {'-':<{HEAD_COLUMN}} not colocated (run: umbrella initjj)")
+            print(
+                f"{sub.path:<{width}} {'-':<{HEAD_COLUMN}} not colocated "
+                f"(run: umbrella initjj){trailer}"
+            )
             continue
         head = sub.head()
         notes = []
@@ -419,12 +454,23 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
             moved = refs.remote_ahead(sub, head)
             if moved is not None:
                 notes.append(f"{moved}-moved-ahead")
+        if stale is not None:
+            notes.append(stale)
         short = str(head)[:SHORT_ID] if head else "-"
         print(f"{sub.path:<{width}} {short:<{HEAD_COLUMN}} {' '.join(notes) or 'in sync'}")
         if head is not None:
             for name in backend.elsewhere(sub, head):
                 print(f"{'':<{width}} {'':<{HEAD_COLUMN}} workspace {name} holds work this "
                       "checkout cannot see")
+    if drifted:
+        print(
+            f"\n  {lock.PATH} names a different commit than the pointer the "
+            "umbrella records.\n"
+            "  Write it again from the recorded revisions. Nothing else here "
+            "reads it, and\n"
+            "  Nix cannot see the pointer, so neither of them reports this on "
+            "its own."
+        )
     return 0
 
 
