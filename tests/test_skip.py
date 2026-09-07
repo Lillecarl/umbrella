@@ -75,7 +75,7 @@ def test_skip_refuses_a_submodule_that_is_checked_out(
     """
     assert checkout.cli("skip", "sub2") == 1
 
-    assert "Remove the directory contents first" in capsys.readouterr().err
+    assert "Remove it with --drop" in capsys.readouterr().err
     assert skip.read(checkout.umbrella().repo) == set()
 
 
@@ -102,6 +102,125 @@ def test_the_choice_is_never_committed(
 
     assert checkout.git("status", "--porcelain").strip() == ""
     assert (checkout.path / ".git" / skip.MARKER).is_file()
+
+
+# -- dropping the working copy ---------------------------------------------
+
+
+def test_drop_removes_the_working_copy_and_records_the_skip(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert checkout.cli("skip", "--drop", "sub2") == 0
+
+    assert capsys.readouterr().out.count("working copy removed") == 1
+    assert skip.read(checkout.umbrella().repo) == {"sub2"}
+    # Present and empty: what a clone with no --recurse-submodules gives, and
+    # what the resolution reads as "no working copy".
+    assert checkout.sub("sub2").is_dir()
+    assert list(checkout.sub("sub2").iterdir()) == []
+    assert checkout.git("status", "--porcelain").strip() == ""
+
+
+def test_drop_keeps_the_repository_so_taking_it_back_downloads_nothing(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    was = checkout.head_of("sub2")
+    assert checkout.cli("skip", "--drop", "sub2") == 0
+    assert (checkout.path / ".git" / "modules" / "sub2").is_dir()
+    capsys.readouterr()
+
+    assert checkout.cli("skip", "--rm", "sub2") == 0
+    assert checkout.cli(f"init{checkout.mode}") == 0
+
+    assert checkout.head_of("sub2") == was
+
+
+def test_drop_refuses_uncommitted_work(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    checkout.edit("sub2", "v2")
+
+    assert checkout.cli("skip", "--drop", "sub2") == 1
+
+    err = capsys.readouterr().err
+    assert "uncommitted work" in err
+    assert "nothing was dropped" in err
+    assert (checkout.sub("sub2") / "file.txt").exists()
+
+
+def test_drop_refuses_a_commit_that_is_on_no_remote(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one thing a re-checkout could not bring back."""
+    checkout.edit("sub2", "v2")
+    head = checkout.commit("sub2", "v2")
+
+    assert checkout.cli("skip", "--drop", "sub2") == 1
+
+    assert f"{head[:8]}, which is on no remote branch" in capsys.readouterr().err
+
+
+def test_drop_allows_a_pushed_commit_and_says_what_was_never_recorded(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Pushed but not landed. Nothing is lost, and the pointer never moved."""
+    recorded = checkout.recorded("sub2")
+    checkout.edit("sub2", "v2")
+    checkout.commit("sub2", "v2")
+    checkout.publish("sub2")
+
+    assert checkout.cli("skip", "--drop", "sub2") == 0
+
+    out = capsys.readouterr().out
+    assert f"records {recorded[:8]}" in out
+    assert "Take it back to land them" in out
+
+
+def test_drop_refuses_when_another_working_copy_shares_it(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A worktreespace shares this checkout's storage, so removing it strands
+    the copy that was made from it."""
+    assert checkout.cli("wts", "add", "spare") == 0
+    capsys.readouterr()
+
+    assert checkout.cli("skip", "--drop", "sub2") == 1
+
+    assert "other working copies" in capsys.readouterr().err
+    assert checkout.cli("wts", "rm", "spare") == 0
+
+
+def test_drop_removes_nothing_when_one_of_them_is_refused(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Half a drop is a worse place to stand than either end."""
+    checkout.edit("sub2", "v2")
+
+    assert checkout.cli("skip", "--drop", "sub1", "sub2") == 1
+
+    assert (checkout.sub("sub1") / "file.txt").exists()
+    assert skip.read(checkout.umbrella().repo) == set()
+
+
+def test_drop_and_rm_together_is_refused(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert checkout.cli("skip", "--rm", "--drop", "sub2") == 1
+
+    assert "Pick one" in capsys.readouterr().err
+
+
+def test_land_works_after_a_drop(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert checkout.cli("skip", "--drop", "sub2") == 0
+    checkout.edit("sub1", "v2")
+    landed = checkout.commit("sub1", "v2")
+    capsys.readouterr()
+
+    assert checkout.cli("land", "-m", "bump sub1") == 0
+
+    assert checkout.recorded("sub1") == landed
 
 
 # -- what the other commands do --------------------------------------------

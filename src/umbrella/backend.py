@@ -54,6 +54,14 @@ class Backend(Protocol):
     def elsewhere(self, sub: Sub, head: Oid) -> list[str]:
         """Other working copies of this submodule that hold unseen work."""
 
+    def working_copies(self, sub: Sub) -> list[str]:
+        """Other working copies of this submodule, whatever they hold.
+
+        `elsewhere` asks which of them hold work nobody has seen. This asks
+        which of them exist at all, because removing the checkout they share
+        their storage with would strand every one of them.
+        """
+
     def add_working_copy(
         self, repo: Path, dest: Path, name: str, revision: str | None,
         branch: str | None = None,
@@ -116,6 +124,16 @@ class GitBackend:
 
     def elsewhere(self, sub: Sub, head: Oid) -> list[str]:
         return []  # a git worktree of a submodule is its own checkout
+
+    def working_copies(self, sub: Sub) -> list[str]:
+        """The linked worktrees, and only those.
+
+        libgit2 lists exactly the linked ones, so the checkout itself never
+        appears. `git worktree list` cannot be filtered the same way here:
+        inside a submodule it names the main worktree by its git directory
+        under .git/modules, which never equals the path the submodule is at.
+        """
+        return list(sub.repo().list_worktrees())
 
     def add_working_copy(
         self, repo: Path, dest: Path, name: str, revision: str | None,
@@ -217,6 +235,9 @@ class JjBackend:
             if jj.work_not_reachable_from(sub.workdir, name, str(head)):
                 found.append(name)
         return found
+
+    def working_copies(self, sub: Sub) -> list[str]:
+        return [name for name in jj.workspaces(sub.workdir) if name != "default"]
 
     def add_working_copy(
         self, repo: Path, dest: Path, name: str, revision: str | None,

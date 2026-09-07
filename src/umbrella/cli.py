@@ -510,10 +510,46 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
     return 0
 
 
-def cmd_skip(umbrella: Umbrella, _backend: Backend, args) -> int:
+def _why_not_droppable(backend: Backend, sub: Sub) -> str | None:
+    """Everything this checkout holds that removing it would destroy.
+
+    `skip` refuses a submodule that is checked out, and `--drop` is the offer
+    to remove the checkout first. So this is the whole of what stands between
+    the two, and each answer names something a rebuild cannot bring back.
+    """
+    if backend.conflicted(sub):
+        return "has unresolved conflicts"
+    if backend.dirty(sub):
+        return "has uncommitted work"
+    others = backend.working_copies(sub)
+    if others:
+        # They share this checkout's object store, so removing it strands them.
+        return f"has other working copies: {', '.join(sorted(others))}"
+    head = sub.head()
+    if head is not None and not sub.on_remote(head):
+        return f"is at {str(head)[:8]}, which is on no remote branch"
+    return None
+
+
+def _drop(umbrella: Umbrella, sub: Sub) -> None:
+    """Leave the directory there and empty, which is what a plain clone gives.
+
+    git keeps the repository itself under .git/modules, so nothing is
+    downloaded again if this checkout takes the submodule back later.
+    """
+    gitcli.run(umbrella.workdir, "submodule", "deinit", "--force", "--", sub.path)
+    # deinit removes what git tracks. A colocated .jj is not tracked, and an
+    # ignored build output is not either.
+    shutil.rmtree(sub.workdir, ignore_errors=True)
+    sub.workdir.mkdir(parents=True, exist_ok=True)
+
+
+def cmd_skip(umbrella: Umbrella, backend: Backend, args) -> int:
     """Show or change which submodules this checkout leaves to the lock."""
     if umbrella.kind is not Kind.UMBRELLA:
         _die("this is a single project. There are no submodules to leave out.")
+    if args.rm and args.drop:
+        _die("--rm takes a submodule back. --drop lets one go. Pick one.")
     subs = {sub.path: sub for sub in umbrella.subs()}
     left = skip.read(umbrella.repo)
 
@@ -546,16 +582,42 @@ def cmd_skip(umbrella: Umbrella, _backend: Backend, args) -> int:
 
     # A working copy wins over the lock, whatever this marker says. Skipping a
     # submodule that is checked out would change nothing about what gets built,
-    # so it is refused rather than quietly recorded.
-    present = [path for path in args.paths if subs[path].present]
-    if present:
+    # so it is refused rather than quietly recorded. --drop removes it first.
+    wanted = sorted(set(args.paths))
+    present = [path for path in wanted if subs[path].present]
+    if present and not args.drop:
         _die(
-            f"{', '.join(sorted(present))}: checked out here, and Nix reads a "
-            "working copy before the lock. Remove the directory contents first, "
-            "then skip it."
+            f"{', '.join(present)}: checked out here, and Nix reads a working "
+            "copy before the lock. Remove it with --drop, or by hand, then "
+            "skip it."
         )
-    skip.write(umbrella.repo, left | set(args.paths))
-    for path in sorted(set(args.paths)):
+
+    # Every reason first, and only then the first removal. Half a drop, with
+    # one submodule gone and the next refused, is a worse place to stand than
+    # either end.
+    refused = {}
+    for path in present:
+        why = _why_not_droppable(backend, subs[path])
+        if why is not None:
+            refused[path] = why
+    if refused:
+        for path, why in sorted(refused.items()):
+            print(f"umbrella: {path} {why}", file=sys.stderr)
+        _die("nothing was dropped. Deal with those first.")
+
+    for path in present:
+        sub = subs[path]
+        behind = sub.recorded is not None and sub.head() != sub.recorded
+        _drop(umbrella, sub)
+        print(f"{path:<12} working copy removed")
+        if behind:
+            print(
+                f"{'':<12} its commits are on a remote, but the umbrella still "
+                f"records {str(sub.recorded)[:8]}. Take it back to land them."
+            )
+
+    skip.write(umbrella.repo, left | set(wanted))
+    for path in wanted:
         print(f"{path:<12} left to the lock")
     return 0
 
@@ -794,16 +856,26 @@ def build_parser() -> argparse.ArgumentParser:
             "to leave that way: initgit does not clone them, and sync and land "
             "step over them. It changes nothing about how a source resolves -- "
             "Nix reads a working copy before the lock whatever this says, which "
-            "is why skipping one that is checked out is refused. The choice "
-            "lives in .git, so it is never committed and never shared. One "
-            "limit: the pre-push hook verifies a pointer by looking in the "
-            "checkout, so landing a new commit for a skipped submodule means "
-            "checking it out again first."
+            "is why skipping one that is checked out is refused unless --drop "
+            "removes it first. The choice lives in .git, so it is never "
+            "committed and never shared. One limit: the pre-push hook verifies "
+            "a pointer by looking in the checkout, so landing a new commit for "
+            "a skipped submodule means checking it out again first."
         ),
     )
     skipper.add_argument("paths", nargs="*", help="submodule paths. None shows the list")
     skipper.add_argument(
         "--rm", action="store_true", help="stop skipping these instead"
+    )
+    skipper.add_argument(
+        "--drop",
+        action="store_true",
+        help=(
+            "remove the working copy first. Refused unless it is clean, holds "
+            "no commit that is on no remote, and has no other working copy "
+            "sharing it. git keeps the repository under .git/modules, so "
+            "taking it back downloads nothing"
+        ),
     )
 
     updater = sub.add_parser(
