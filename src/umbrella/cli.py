@@ -14,7 +14,22 @@ from . import gitcli, guards, hooks, initcc, jj, kind, mode, refs, wts
 from .backend import Backend
 from .kind import Kind
 from .mode import Mode
-from .model import Relation, Sub, Umbrella, UmbrellaError
+from .model import SHORT_ID, Relation, Sub, Umbrella, UmbrellaError
+
+
+#: How wide the column that leads a line is, in characters.
+#:
+#: `PATH` holds a submodule path and `NAME` a worktree or workspace
+#: name. Neither one truncates: an f-string pads and never cuts, so a
+#: path longer than the column simply pushes the rest of the line
+#: right. `prompt-toolkit` is fourteen and already does that, which is
+#: why `status` measures its own width instead of using these.
+PATH_COLUMN = 12
+NAME_COLUMN = 16
+
+#: How wide the HEAD column of `status` is: an abbreviated id and the
+#: two spaces that keep it off the next word.
+HEAD_COLUMN = SHORT_ID + 2
 
 
 def _die(message: str) -> None:
@@ -46,7 +61,7 @@ def _clone_missing(umbrella: Umbrella) -> None:
     missing = [s.path for s in umbrella.subs() if not s.present]
     gitcli.submodule_clone(umbrella.workdir, missing)
     for path in missing:
-        print(f"{path:<12} checked out")
+        print(f"{path:<{PATH_COLUMN}} checked out")
 
 
 def _install(umbrella: Umbrella) -> None:
@@ -108,13 +123,13 @@ def cmd_initjj(umbrella: Umbrella, _backend: Backend, _args) -> int:
 
     for sub in umbrella.subs():
         if sub.colocated:
-            print(f"{sub.path:<12} already colocated")
+            print(f"{sub.path:<{PATH_COLUMN}} already colocated")
         else:
             jj.init_colocate(sub.workdir)
-            print(f"{sub.path:<12} colocated")
+            print(f"{sub.path:<{PATH_COLUMN}} colocated")
         for bookmark in jj.untracked_remote_bookmarks(sub.workdir):
             jj.track(sub.workdir, bookmark)
-            print(f"{sub.path:<12} tracking {bookmark}")
+            print(f"{sub.path:<{PATH_COLUMN}} tracking {bookmark}")
 
     mode.write(umbrella.repo, Mode.JJ)
     print(f"mode:   {Mode.JJ} (marker in .git, never committed)")
@@ -161,7 +176,7 @@ def _create(
         base = backend.base_revision(umbrella.workdir, revision)
         branch = f"worktree/{name}" if backend.mode is Mode.GIT else None
         backend.add_working_copy(umbrella.workdir, path, name, base, branch)
-        log(f"{name:<16} {path}")
+        log(f"{name:<{NAME_COLUMN}} {path}")
         return
 
     # The umbrella itself is plain git whichever mode drives the submodules.
@@ -176,12 +191,12 @@ def _create(
     # a worktreespace of an older umbrella gets the submodules of that day.
     for sub in umbrella.subs(revision):
         if sub.recorded is None or not sub.present:
-            log(f"{sub.path:<12} skipped, nothing recorded to check out")
+            log(f"{sub.path:<{PATH_COLUMN}} skipped, nothing recorded to check out")
             continue
         backend.add_working_copy(
             sub.workdir, path / sub.path, name, str(sub.recorded)
         )
-        log(f"{sub.path:<12} at {str(sub.recorded)[:8]}")
+        log(f"{sub.path:<{PATH_COLUMN}} at {str(sub.recorded)[:SHORT_ID]}")
 
 
 def _destroy(umbrella: Umbrella, backend: Backend, name: str, path: Path) -> None:
@@ -193,12 +208,12 @@ def _destroy(umbrella: Umbrella, backend: Backend, name: str, path: Path) -> Non
                 backend.drop_working_copy(sub.workdir, path / sub.path, name)
             except (jj.JjError, gitcli.GitError) as error:
                 # Removing what is left matters more than one already gone.
-                _to_stderr(f"{sub.path:<12} {str(error).splitlines()[0]}")
+                _to_stderr(f"{sub.path:<{PATH_COLUMN}} {str(error).splitlines()[0]}")
         gitcli.worktree_remove(umbrella.workdir, path)
         left = gitcli.drop_branch(umbrella.workdir, f"worktree/{name}")
         if left is not None:
             _to_stderr(
-                f"worktree/{name} held {str(left)[:8]}, which is on no other "
+                f"worktree/{name} held {str(left)[:SHORT_ID]}, which is on no other "
                 "branch. It is still in the reflog."
             )
     else:
@@ -229,9 +244,9 @@ def cmd_wts_list(umbrella: Umbrella, _backend: Backend, _args) -> int:
         except UmbrellaError:
             continue
         name = wts.read(other.repo)
-        print(f"{name or '-':<16} {path}")
+        print(f"{name or '-':<{NAME_COLUMN}} {path}")
     for name in backend_workspaces(umbrella, _backend):
-        print(f"{name:<16} (workspace)")
+        print(f"{name:<{NAME_COLUMN}} (workspace)")
     return 0
 
 
@@ -381,13 +396,13 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
     subs = umbrella.subs()
     # A name wider than the column would push every later field out of line.
     width = max([len("SUBMODULE")] + [len(sub.path) for sub in subs])
-    print(f"{'SUBMODULE':<{width}} {'HEAD':<10} STATE")
+    print(f"{'SUBMODULE':<{width}} {'HEAD':<{HEAD_COLUMN}} STATE")
     for sub in subs:
         if not sub.present:
-            print(f"{sub.path:<{width}} {'-':<10} not checked out (run: umbrella initgit)")
+            print(f"{sub.path:<{width}} {'-':<{HEAD_COLUMN}} not checked out (run: umbrella initgit)")
             continue
         if backend.mode is Mode.JJ and not sub.colocated:
-            print(f"{sub.path:<{width}} {'-':<10} not colocated (run: umbrella initjj)")
+            print(f"{sub.path:<{width}} {'-':<{HEAD_COLUMN}} not colocated (run: umbrella initjj)")
             continue
         head = sub.head()
         notes = []
@@ -404,11 +419,11 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
             moved = refs.remote_ahead(sub, head)
             if moved is not None:
                 notes.append(f"{moved}-moved-ahead")
-        short = str(head)[:8] if head else "-"
-        print(f"{sub.path:<{width}} {short:<10} {' '.join(notes) or 'in sync'}")
+        short = str(head)[:SHORT_ID] if head else "-"
+        print(f"{sub.path:<{width}} {short:<{HEAD_COLUMN}} {' '.join(notes) or 'in sync'}")
         if head is not None:
             for name in backend.elsewhere(sub, head):
-                print(f"{'':<{width}} {'':<10} workspace {name} holds work this "
+                print(f"{'':<{width}} {'':<{HEAD_COLUMN}} workspace {name} holds work this "
                       "checkout cannot see")
     return 0
 
@@ -424,13 +439,13 @@ def cmd_sync(umbrella: Umbrella, backend: Backend, _args) -> int:
             _die(f"{sub.path} is not checked out. Run: umbrella initgit")
         backend.fetch(sub)
         if sub.recorded is None:
-            print(f"{sub.path:<12} the umbrella records no commit yet")
+            print(f"{sub.path:<{PATH_COLUMN}} the umbrella records no commit yet")
             continue
         if sub.head() == sub.recorded:
-            print(f"{sub.path:<12} already at {str(sub.recorded)[:8]}")
+            print(f"{sub.path:<{PATH_COLUMN}} already at {str(sub.recorded)[:SHORT_ID]}")
             continue
         if backend.dirty(sub):
-            print(f"{sub.path:<12} has uncommitted work, so it was left alone")
+            print(f"{sub.path:<{PATH_COLUMN}} has uncommitted work, so it was left alone")
             continue
         if not sub.contains(sub.recorded):
             _die(
@@ -438,7 +453,7 @@ def cmd_sync(umbrella: Umbrella, backend: Backend, _args) -> int:
                 "has. Whoever recorded it never pushed it."
             )
         backend.move_to(sub, sub.recorded)
-        print(f"{sub.path:<12} moved to {str(sub.recorded)[:8]}")
+        print(f"{sub.path:<{PATH_COLUMN}} moved to {str(sub.recorded)[:SHORT_ID]}")
     return 0
 
 
@@ -459,11 +474,11 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
         if not sub.present:
             _die(f"{sub.path} is not checked out. Run: umbrella initgit")
         if not args.no_advance and backend.finalize(sub):
-            print(f"{sub.path:<12} closed the working commit")
+            print(f"{sub.path:<{PATH_COLUMN}} closed the working commit")
         head = sub.head()
         if head is None or head == sub.recorded:
             if head is not None and backend.dirty(sub):
-                print(f"{sub.path:<12} has work with no description, which land ignores")
+                print(f"{sub.path:<{PATH_COLUMN}} has work with no description, which land ignores")
             continue
         if backend.conflicted(sub):
             _die(f"{sub.path}: has unresolved conflicts. Resolve them first.")
@@ -482,12 +497,12 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
                     f"{sub.path}: {choice.name} does not point at the commit to "
                     "land, and --no-advance forbids moving it."
                 )
-            was = str(choice.target)[:8] if choice.target else "new"
+            was = str(choice.target)[:SHORT_ID] if choice.target else "new"
             backend.advance(sub, choice.name, choice.target is not None, head)
-            print(f"{sub.path:<12} {choice.name}: {was} -> {str(head)[:8]} (fast-forward)")
+            print(f"{sub.path:<{PATH_COLUMN}} {choice.name}: {was} -> {str(head)[:SHORT_ID]} (fast-forward)")
         backend.push(sub, choice.name)
         umbrella.stage_gitlink(sub, head)
-        print(f"{sub.path:<12} pushed {choice.name}, staged {str(head)[:8]}")
+        print(f"{sub.path:<{PATH_COLUMN}} pushed {choice.name}, staged {str(head)[:SHORT_ID]}")
         staged = True
 
     if not staged:

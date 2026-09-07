@@ -12,6 +12,14 @@ from pygit2 import Oid, Repository
 from .kind import Kind
 from pygit2.enums import FileMode, RepositoryOpenFlag
 
+#: How many hex digits of a commit id to print.
+#:
+#: Git abbreviates to seven by default and grows the number when seven
+#: is not unique. Eight is one more than that, which is plenty for a
+#: collection of a handful of repositories. Every message that shows an
+#: id uses this one, so two lines line up.
+SHORT_ID = 8
+
 
 class UmbrellaError(RuntimeError):
     """The umbrella is not usable."""

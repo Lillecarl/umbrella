@@ -15,7 +15,7 @@ from pygit2 import Oid
 
 from . import gitcli, jj
 from .mode import Mode
-from .model import Sub
+from .model import SHORT_ID, Sub
 
 
 class Backend(Protocol):
@@ -135,7 +135,7 @@ class GitBackend:
         left = gitcli.drop_branch(repo, f"worktree/{name}")
         if left is not None:
             print(
-                f"worktree/{name} held {str(left)[:8]}, which is on no other "
+                f"worktree/{name} held {str(left)[:SHORT_ID]}, which is on no other "
                 "branch. It is still in the reflog.",
                 file=sys.stderr,
             )

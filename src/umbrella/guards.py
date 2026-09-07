@@ -9,7 +9,7 @@ from pygit2 import Oid
 from .backend import Backend
 from .gitcli import GitError
 from .jj import JjError
-from .model import Sub, Umbrella
+from .model import SHORT_ID, Sub, Umbrella
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class Problem:
     reason: str
 
     def __str__(self) -> str:
-        return f"{self.path}: commit {str(self.oid)[:8]} {self.reason}"
+        return f"{self.path}: commit {str(self.oid)[:SHORT_ID]} {self.reason}"
 
 
 def _is_zero(sha: str) -> bool:
