@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pygit2
 from pygit2 import Oid, Repository
@@ -56,6 +56,17 @@ class Sub:
     workdir: Path
     recorded: Oid | None
     declared: str | None   # submodule.<name>.branch from .gitmodules
+
+    @property
+    def source(self) -> str:
+        """The name a Nix source set gives this submodule.
+
+        A submodule is known by its path and a source by its name. They meet at
+        the last component of the path. `status` and `update` both need the
+        rule, and two copies of it would let them disagree about which sources
+        are submodules at all.
+        """
+        return PurePosixPath(self.path).name
 
     @property
     def colocated(self) -> bool:

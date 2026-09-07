@@ -7,7 +7,7 @@ import json
 import os
 import shutil
 import sys
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from pygit2 import Oid
 
@@ -382,16 +382,15 @@ def _worktreespace_note(umbrella: Umbrella) -> str | None:
 def _lock_note(locked: dict[str, Oid], sub: Sub) -> str | None:
     """What the lock names, when that is not what the umbrella records.
 
-    The lock keys are source names and a submodule is known by its path, so the
-    two meet at the last component of the path. A name the lock does not carry
-    is not a fault: most sources in a lock are not submodules at all.
+    A name the lock does not carry is not a fault: most sources in a lock are
+    not submodules at all. `Sub.source` is the rule that matches the two, and
+    `update` uses the same one.
 
     This says which commit the lock names and does not say which of the two is
     wrong. Either can be: a `land` that moved the pointer leaves the lock
     behind, and a lock written from a newer revision runs ahead of it.
     """
-    name = PurePosixPath(sub.path).name
-    rev = locked.get(name)
+    rev = locked.get(sub.source)
     if rev is None or rev == sub.recorded:
         return None
     return f"lock-names-{str(rev)[:8]}"
