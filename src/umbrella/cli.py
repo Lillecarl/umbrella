@@ -697,7 +697,9 @@ def main(argv: list[str] | None = None) -> int:
         command = f"hook.{args.hook_command}"
     try:
         return COMMANDS[command](umbrella, backend, args)
-    except (jj.JjError, gitcli.GitError) as error:
+    except (jj.JjError, gitcli.GitError, UmbrellaError) as error:
+        # Every one of these carries a sentence written for the person running
+        # the command. A traceback would hide it.
         _die(str(error))
         return 1
 
