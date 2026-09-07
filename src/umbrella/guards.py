@@ -39,7 +39,10 @@ def check_commit(umbrella: Umbrella) -> list[Problem]:
         oid = staged.get(sub.path)
         if oid is None or oid == sub.recorded:
             continue
-        if not sub.workdir.exists():
+        # `present`, not `exists`. A clone made without --recurse-submodules
+        # leaves the directory there and empty, and libgit2 refuses to open
+        # one of those. So does a checkout that skips this submodule.
+        if not sub.present:
             continue
         if not sub.on_remote(oid):
             problems.append(Problem(sub.path, oid, "is on no remote branch"))
@@ -91,7 +94,7 @@ def check_push(
     problems = []
     for path, oid in sorted(pointers, key=lambda item: (item[0], str(item[1]))):
         sub = subs[path]
-        if not sub.workdir.exists():
+        if not sub.present:
             problems.append(Problem(path, oid, "has no checkout here, so it cannot be verified"))
         elif not sub.contains(oid):
             problems.append(Problem(path, oid, "is not even in this checkout"))
@@ -102,7 +105,7 @@ def check_push(
 
 def _refresh(backend: Backend, sub: Sub) -> None:
     """Make the submodule's remote-tracking refs current."""
-    if not sub.workdir.exists():
+    if not sub.present:
         return
     try:
         backend.fetch(sub)
