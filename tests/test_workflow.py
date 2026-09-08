@@ -245,8 +245,16 @@ def test_land_closes_a_described_working_commit(jj_checkout: Checkout) -> None:
     jj_checkout.edit("sub1", "v2")
     jj_checkout.jj("sub1", "describe", "-m", "v2")
     landed = run(
-        "jj", "--no-pager", "-R", str(jj_checkout.sub("sub1")),
-        "log", "--no-graph", "-r", "@", "-T", "commit_id",
+        "jj",
+        "--no-pager",
+        "-R",
+        str(jj_checkout.sub("sub1")),
+        "log",
+        "--no-graph",
+        "-r",
+        "@",
+        "-T",
+        "commit_id",
     ).strip()
 
     assert jj_checkout.cli("land", "-m", "bump sub1") == 0
@@ -257,8 +265,16 @@ def test_land_closes_a_described_working_commit(jj_checkout: Checkout) -> None:
     assert jj_checkout.head_of("sub1") == landed
     assert (
         run(
-            "jj", "--no-pager", "-R", str(jj_checkout.sub("sub1")),
-            "log", "--no-graph", "-r", "@", "-T", "empty",
+            "jj",
+            "--no-pager",
+            "-R",
+            str(jj_checkout.sub("sub1")),
+            "log",
+            "--no-graph",
+            "-r",
+            "@",
+            "-T",
+            "empty",
         ).strip()
         == "true"
     )
@@ -301,8 +317,16 @@ def test_land_never_closes_a_conflicted_working_commit(
         jj_checkout.edit("sub1", side)
         run("jj", "--no-pager", "-R", sub, "commit", "-m", side)
         sides[side] = run(
-            "jj", "--no-pager", "-R", sub, "log", "--no-graph", "-r", "@-",
-            "-T", "commit_id",
+            "jj",
+            "--no-pager",
+            "-R",
+            sub,
+            "log",
+            "--no-graph",
+            "-r",
+            "@-",
+            "-T",
+            "commit_id",
         ).strip()
     run("jj", "--no-pager", "-R", sub, "new", sides["left"], sides["right"])
     run("jj", "--no-pager", "-R", sub, "describe", "-m", "a described conflict")
@@ -319,8 +343,13 @@ def test_status_reports_work_hidden_in_another_workspace(
     """A jj workspace does not move git HEAD, so the umbrella cannot see it."""
     workspace = tmp_path / "side-workspace"
     run(
-        "jj", "--no-pager", "-R", str(jj_checkout.sub("sub1")),
-        "workspace", "add", str(workspace),
+        "jj",
+        "--no-pager",
+        "-R",
+        str(jj_checkout.sub("sub1")),
+        "workspace",
+        "add",
+        str(workspace),
     )
     (workspace / "file.txt").write_text("work done elsewhere\n")
     run("jj", "--no-pager", "-R", str(workspace), "commit", "-m", "elsewhere")
@@ -337,15 +366,18 @@ def test_status_says_nothing_about_a_workspace_with_no_unseen_work(
 ) -> None:
     workspace = tmp_path / "quiet-workspace"
     run(
-        "jj", "--no-pager", "-R", str(jj_checkout.sub("sub1")),
-        "workspace", "add", str(workspace),
+        "jj",
+        "--no-pager",
+        "-R",
+        str(jj_checkout.sub("sub1")),
+        "workspace",
+        "add",
+        str(workspace),
     )
 
     assert jj_checkout.cli("status") == 0
 
     assert "cannot see" not in capsys.readouterr().out
-
-
 
 
 def test_status_lines_up_when_a_name_is_long(
@@ -354,14 +386,23 @@ def test_status_lines_up_when_a_name_is_long(
     """A submodule called prompt-toolkit is wider than the old fixed column."""
     long_name = "a-rather-long-submodule-name"
     run(
-        "git", "submodule", "add", "-q", str(lab.origin("sub1")), long_name,
+        "git",
+        "submodule",
+        "add",
+        "-q",
+        str(lab.origin("sub1")),
+        long_name,
         cwd=git_checkout.path,
     )
     run("git", "commit", "-qm", "add a long name", cwd=git_checkout.path)
 
     assert git_checkout.cli("status") == 0
 
-    lines = [l for l in capsys.readouterr().out.splitlines() if " in sync" in l or "HEAD" in l]
+    lines = [
+        l
+        for l in capsys.readouterr().out.splitlines()
+        if " in sync" in l or "HEAD" in l
+    ]
     heads = {l.index("HEAD") for l in lines if "HEAD" in l}
     assert len(heads) == 1
     column = heads.pop()

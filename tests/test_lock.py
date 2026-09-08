@@ -41,7 +41,9 @@ def test_no_lock_file_says_nothing(
 def test_a_lock_that_agrees_says_nothing(
     checkout: Checkout, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _lock(checkout, {name: {"rev": checkout.recorded(name)} for name in ("sub1", "sub2")})
+    _lock(
+        checkout, {name: {"rev": checkout.recorded(name)} for name in ("sub1", "sub2")}
+    )
 
     assert "lock-names" not in _status(checkout, capsys)
 
@@ -77,7 +79,9 @@ def test_landing_leaves_the_lock_behind(
     the lock, so the lock still names the commit from before.
     """
     was = checkout.recorded("sub1")
-    _lock(checkout, {name: {"rev": checkout.recorded(name)} for name in ("sub1", "sub2")})
+    _lock(
+        checkout, {name: {"rev": checkout.recorded(name)} for name in ("sub1", "sub2")}
+    )
 
     checkout.edit("sub1", "v2")
     landed = checkout.commit("sub1", "v2")

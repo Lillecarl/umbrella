@@ -58,7 +58,7 @@ def test_a_local_bookmark_that_follows_the_pointer_is_chosen(
 
     choice = _choose(jj_checkout, "sub1")
     assert choice.name == "main"
-    assert str(choice.target) == before   # the bookmark has not moved yet
+    assert str(choice.target) == before  # the bookmark has not moved yet
     assert choice.needs_move
 
 
@@ -99,7 +99,12 @@ def test_a_declared_branch_wins_over_everything(jj_checkout: Checkout) -> None:
     jj_checkout.jj("sub1", "bookmark", "create", "release", "-r", "main")
     jj_checkout.jj("sub1", "git", "push", "--bookmark", "release")
     run(
-        "git", "config", "-f", ".gitmodules", "submodule.sub1.branch", "release",
+        "git",
+        "config",
+        "-f",
+        ".gitmodules",
+        "submodule.sub1.branch",
+        "release",
         cwd=jj_checkout.path,
     )
     run("git", "commit", "-qam", "declare a branch", cwd=jj_checkout.path)
@@ -114,15 +119,22 @@ def test_a_declared_branch_wins_over_everything(jj_checkout: Checkout) -> None:
     assert refs.choose(sub, sub.head(), None).name == "release"
 
 
-def test_a_dot_declaration_means_the_umbrella_own_branch(git_checkout: Checkout) -> None:
+def test_a_dot_declaration_means_the_umbrella_own_branch(
+    git_checkout: Checkout,
+) -> None:
     run(
-        "git", "config", "-f", ".gitmodules", "submodule.sub1.branch", ".",
+        "git",
+        "config",
+        "-f",
+        ".gitmodules",
+        "submodule.sub1.branch",
+        ".",
         cwd=git_checkout.path,
     )
     run("git", "commit", "-qam", "declare dot", cwd=git_checkout.path)
 
     sub = git_checkout.umbrella().sub("sub1")
-    assert sub.declared == "main"   # the umbrella is on main
+    assert sub.declared == "main"  # the umbrella is on main
 
 
 @needs_jj
@@ -139,7 +151,12 @@ def test_a_declaration_resolves_an_ambiguity_that_would_otherwise_refuse(
         _choose(jj_checkout, "sub1")
 
     run(
-        "git", "config", "-f", ".gitmodules", "submodule.sub1.branch", "main",
+        "git",
+        "config",
+        "-f",
+        ".gitmodules",
+        "submodule.sub1.branch",
+        "main",
         cwd=jj_checkout.path,
     )
     run("git", "commit", "-qam", "declare the branch", cwd=jj_checkout.path)

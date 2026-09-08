@@ -347,8 +347,14 @@ def test_pushing_a_pointer_for_a_skipped_submodule_is_still_refused(
     assert checkout.cli("initgit") == 0
 
     moved = lab.push_from_elsewhere("sub2", "v2")
-    run("git", "update-index", "--add", "--cacheinfo", f"160000,{moved},sub2",
-        cwd=checkout.path)
+    run(
+        "git",
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"160000,{moved},sub2",
+        cwd=checkout.path,
+    )
     run("git", "commit", "-qm", "point at sub2", cwd=checkout.path)
     tip = run("git", "rev-parse", "HEAD", cwd=checkout.path).strip()
     capsys.readouterr()

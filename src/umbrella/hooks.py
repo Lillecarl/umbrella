@@ -33,8 +33,8 @@ fi
 """
 
 _BODIES = {
-    "pre-commit": "exec \"$exe\" check-commit\n",
-    "pre-push": "exec \"$exe\" check-push \"$@\"\n",
+    "pre-commit": 'exec "$exe" check-commit\n',
+    "pre-push": 'exec "$exe" check-push "$@"\n',
 }
 
 

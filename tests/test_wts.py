@@ -24,7 +24,9 @@ def test_a_worktree_is_a_working_constellation(checkout: Checkout) -> None:
         ).read_text()
 
 
-def test_a_worktree_is_listed(checkout: Checkout, capsys: pytest.CaptureFixture[str]) -> None:
+def test_a_worktree_is_listed(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert checkout.cli("wts", "add", "poc") == 0
     capsys.readouterr()
 
@@ -87,7 +89,9 @@ def test_work_in_a_worktree_shows_up_in_the_source_status(
 
     assert jj_checkout.cli("status") == 0
 
-    assert "workspace poc holds work this checkout cannot see" in capsys.readouterr().out
+    assert (
+        "workspace poc holds work this checkout cannot see" in capsys.readouterr().out
+    )
 
 
 def test_a_wts_can_be_made_from_an_older_umbrella_commit(checkout: Checkout) -> None:

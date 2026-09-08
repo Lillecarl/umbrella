@@ -38,7 +38,9 @@ def spec(workdir: Path) -> dict[str, dict[str, str]]:
     """
     if not (workdir / SPEC).is_file():
         raise NixError(f"there is no {SPEC} here, so there is nothing to update")
-    return json.loads(_capture(workdir, "eval", "--json", "--file", SPEC, "--apply", _APPLY))
+    return json.loads(
+        _capture(workdir, "eval", "--json", "--file", SPEC, "--apply", _APPLY)
+    )
 
 
 def parse_prefetch(raw: str) -> dict:

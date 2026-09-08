@@ -70,7 +70,9 @@ def push(umbrella: Path) -> None:
     run(umbrella, "push")
 
 
-def worktree_add(repo: Path, dest: Path, branch: str, revision: str | None = None) -> None:
+def worktree_add(
+    repo: Path, dest: Path, branch: str, revision: str | None = None
+) -> None:
     args = ["worktree", "add", "-b", branch, str(dest)]
     if revision is not None:
         args.append(revision)

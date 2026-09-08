@@ -61,7 +61,9 @@ def init_colocate(path: Path) -> None:
 
 
 def working_copy_is_empty(repo: Path) -> bool:
-    return capture(repo, "log", "--no-graph", "-r", "@", "-T", "empty").strip() == "true"
+    return (
+        capture(repo, "log", "--no-graph", "-r", "@", "-T", "empty").strip() == "true"
+    )
 
 
 def has_conflict(repo: Path) -> bool:
@@ -77,7 +79,9 @@ def has_conflict(repo: Path) -> bool:
 
 def working_copy_is_described(repo: Path) -> bool:
     template = 'if(description, "yes", "no")'
-    return capture(repo, "log", "--no-graph", "-r", "@", "-T", template).strip() == "yes"
+    return (
+        capture(repo, "log", "--no-graph", "-r", "@", "-T", template).strip() == "yes"
+    )
 
 
 def close_working_copy(repo: Path) -> None:
@@ -150,7 +154,9 @@ def trunk_bookmark(repo: Path) -> str | None:
 
 def untracked_remote_bookmarks(repo: Path) -> list[str]:
     """Remote bookmarks that no local bookmark follows, as name@remote."""
-    template = 'if(remote && remote != "git" && !tracked, name ++ "@" ++ remote ++ "\n")'
+    template = (
+        'if(remote && remote != "git" && !tracked, name ++ "@" ++ remote ++ "\n")'
+    )
     out = capture(repo, "bookmark", "list", "--all-remotes", "-T", template)
     return [line.strip() for line in out.splitlines() if line.strip()]
 

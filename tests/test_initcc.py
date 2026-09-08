@@ -18,9 +18,7 @@ def _settings(checkout: Checkout, local: bool = False) -> dict:
 
 def _commands(data: dict, event: str) -> list[str]:
     return [
-        hook["command"]
-        for entry in data["hooks"][event]
-        for hook in entry["hooks"]
+        hook["command"] for entry in data["hooks"][event] for hook in entry["hooks"]
     ]
 
 
@@ -56,7 +54,10 @@ def test_initcc_keeps_everything_already_in_the_file(single: Checkout) -> None:
                 "model": "opus",
                 "hooks": {
                     "PreToolUse": [
-                        {"matcher": "Bash", "hooks": [{"type": "command", "command": "theirs"}]}
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "theirs"}],
+                        }
                     ]
                 },
             }
@@ -219,9 +220,7 @@ def test_nothing_is_named_when_no_plugin_is_disabled(
     assert "enabledPlugins" not in _settings(single)
 
 
-def test_a_missing_skills_directory_is_not_an_error(
-    single: Checkout, tmp_path
-) -> None:
+def test_a_missing_skills_directory_is_not_an_error(single: Checkout, tmp_path) -> None:
     assert (
         single.cli(
             "initcc",

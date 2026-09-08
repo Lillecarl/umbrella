@@ -30,7 +30,7 @@ class Choice:
     """The branch to push, and where it sits now."""
 
     name: str
-    target: Oid | None      # None when the branch does not exist yet
+    target: Oid | None  # None when the branch does not exist yet
     needs_move: bool
 
 

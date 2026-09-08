@@ -52,7 +52,9 @@ def test_a_wts_of_a_single_project_shares_its_storage(single: Checkout) -> None:
     made = single.path.parent / f"{single.path.name}-poc"
 
     if single.mode == "jj":
-        assert "poc:" in run("jj", "--no-pager", "-R", str(single.path), "workspace", "list")
+        assert "poc:" in run(
+            "jj", "--no-pager", "-R", str(single.path), "workspace", "list"
+        )
         assert not (made / ".git").exists()  # a workspace, not a checkout of git
     else:
         # A worktree points into the repo it came from rather than owning one.

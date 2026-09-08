@@ -90,9 +90,7 @@ def test_create_and_remove_can_be_repeated(
     assert not _hook_dir(single.path, "task").exists()
 
 
-def test_create_refuses_a_payload_with_no_name(
-    single: Checkout, monkeypatch
-) -> None:
+def test_create_refuses_a_payload_with_no_name(single: Checkout, monkeypatch) -> None:
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(single.path))
 
     assert single.cli_stdin("{}", *CREATE) == 1
@@ -205,7 +203,9 @@ def test_create_excludes_its_directory_from_a_linked_worktree(
 # -- stdout has to be the path and nothing else ----------------------------
 
 
-def _as_subprocess(project: Path, *args: str, payload: str) -> "subprocess.CompletedProcess[str]":
+def _as_subprocess(
+    project: Path, *args: str, payload: str
+) -> "subprocess.CompletedProcess[str]":
     import os
     import subprocess
     import sys

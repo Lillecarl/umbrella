@@ -95,7 +95,9 @@ def check_push(
     for path, oid in sorted(pointers, key=lambda item: (item[0], str(item[1]))):
         sub = subs[path]
         if not sub.present:
-            problems.append(Problem(path, oid, "has no checkout here, so it cannot be verified"))
+            problems.append(
+                Problem(path, oid, "has no checkout here, so it cannot be verified")
+            )
         elif not sub.contains(oid):
             problems.append(Problem(path, oid, "is not even in this checkout"))
         elif not sub.on_remote(oid):

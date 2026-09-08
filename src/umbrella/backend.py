@@ -63,7 +63,11 @@ class Backend(Protocol):
         """
 
     def add_working_copy(
-        self, repo: Path, dest: Path, name: str, revision: str | None,
+        self,
+        repo: Path,
+        dest: Path,
+        name: str,
+        revision: str | None,
         branch: str | None = None,
     ) -> None:
         """One more working copy of a repo, sharing its storage.
@@ -136,7 +140,11 @@ class GitBackend:
         return list(sub.repo().list_worktrees())
 
     def add_working_copy(
-        self, repo: Path, dest: Path, name: str, revision: str | None,
+        self,
+        repo: Path,
+        dest: Path,
+        name: str,
+        revision: str | None,
         branch: str | None = None,
     ) -> None:
         # A worktree of the repo, not another clone of it. git submodule update
@@ -240,7 +248,11 @@ class JjBackend:
         return [name for name in jj.workspaces(sub.workdir) if name != "default"]
 
     def add_working_copy(
-        self, repo: Path, dest: Path, name: str, revision: str | None,
+        self,
+        repo: Path,
+        dest: Path,
+        name: str,
+        revision: str | None,
         branch: str | None = None,
     ) -> None:
         jj.workspace_add(repo, name, dest, revision)

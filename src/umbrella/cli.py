@@ -224,9 +224,7 @@ def _create(
         if sub.recorded is None or not sub.present:
             log(f"{sub.path:<{PATH_COLUMN}} skipped, nothing recorded to check out")
             continue
-        backend.add_working_copy(
-            sub.workdir, path / sub.path, name, str(sub.recorded)
-        )
+        backend.add_working_copy(sub.workdir, path / sub.path, name, str(sub.recorded))
         log(f"{sub.path:<{PATH_COLUMN}} at {str(sub.recorded)[:SHORT_ID]}")
 
 
@@ -254,7 +252,9 @@ def _destroy(umbrella: Umbrella, backend: Backend, name: str, path: Path) -> Non
 
 def cmd_wts_add(umbrella: Umbrella, backend: Backend, args) -> int:
     if wts.read(umbrella.repo) is not None:
-        _die("this is already a worktreespace. Make the next one from the checkout it came from.")
+        _die(
+            "this is already a worktreespace. Make the next one from the checkout it came from."
+        )
     path = _wts_path(umbrella, args.name, args.path)
     if path.exists():
         _die(f"{path} already exists")
@@ -493,11 +493,15 @@ def cmd_status(umbrella: Umbrella, backend: Backend, args) -> int:
         if stale is not None:
             notes.append(stale)
         short = str(head)[:SHORT_ID] if head else "-"
-        print(f"{sub.path:<{width}} {short:<{HEAD_COLUMN}} {' '.join(notes) or 'in sync'}")
+        print(
+            f"{sub.path:<{width}} {short:<{HEAD_COLUMN}} {' '.join(notes) or 'in sync'}"
+        )
         if head is not None:
             for name in backend.elsewhere(sub, head):
-                print(f"{'':<{width}} {'':<{HEAD_COLUMN}} workspace {name} holds work this "
-                      "checkout cannot see")
+                print(
+                    f"{'':<{width}} {'':<{HEAD_COLUMN}} workspace {name} holds work this "
+                    "checkout cannot see"
+                )
     if drifted:
         print(
             f"\n  {lock.PATH} names a different commit than the pointer the "
@@ -674,10 +678,14 @@ def cmd_sync(umbrella: Umbrella, backend: Backend, _args) -> int:
             print(f"{sub.path:<{PATH_COLUMN}} the umbrella records no commit yet")
             continue
         if sub.head() == sub.recorded:
-            print(f"{sub.path:<{PATH_COLUMN}} already at {str(sub.recorded)[:SHORT_ID]}")
+            print(
+                f"{sub.path:<{PATH_COLUMN}} already at {str(sub.recorded)[:SHORT_ID]}"
+            )
             continue
         if backend.dirty(sub):
-            print(f"{sub.path:<{PATH_COLUMN}} has uncommitted work, so it was left alone")
+            print(
+                f"{sub.path:<{PATH_COLUMN}} has uncommitted work, so it was left alone"
+            )
             continue
         if not sub.contains(sub.recorded):
             _die(
@@ -740,7 +748,9 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
         head = sub.head()
         if head is None or head == sub.recorded:
             if head is not None and backend.dirty(sub):
-                print(f"{sub.path:<{PATH_COLUMN}} has work with no description, which land ignores")
+                print(
+                    f"{sub.path:<{PATH_COLUMN}} has work with no description, which land ignores"
+                )
             continue
         if backend.conflicted(sub):
             _die(f"{sub.path}: has unresolved conflicts. Resolve them first.")
@@ -761,10 +771,14 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
                 )
             was = str(choice.target)[:SHORT_ID] if choice.target else "new"
             backend.advance(sub, choice.name, choice.target is not None, head)
-            print(f"{sub.path:<{PATH_COLUMN}} {choice.name}: {was} -> {str(head)[:SHORT_ID]} (fast-forward)")
+            print(
+                f"{sub.path:<{PATH_COLUMN}} {choice.name}: {was} -> {str(head)[:SHORT_ID]} (fast-forward)"
+            )
         backend.push(sub, choice.name)
         umbrella.stage_gitlink(sub, head)
-        print(f"{sub.path:<{PATH_COLUMN}} pushed {choice.name}, staged {str(head)[:SHORT_ID]}")
+        print(
+            f"{sub.path:<{PATH_COLUMN}} pushed {choice.name}, staged {str(head)[:SHORT_ID]}"
+        )
         landed[sub.source] = head
 
     if not landed:
@@ -863,7 +877,9 @@ def build_parser() -> argparse.ArgumentParser:
             "a skipped submodule means checking it out again first."
         ),
     )
-    skipper.add_argument("paths", nargs="*", help="submodule paths. None shows the list")
+    skipper.add_argument(
+        "paths", nargs="*", help="submodule paths. None shows the list"
+    )
     skipper.add_argument(
         "--rm", action="store_true", help="stop skipping these instead"
     )

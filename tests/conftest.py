@@ -20,9 +20,7 @@ needs_jj = pytest.mark.skipif(not HAS_JJ, reason="jj is not installed")
 
 
 def run(*args: str, cwd: Path | None = None) -> str:
-    proc = subprocess.run(
-        args, cwd=cwd, capture_output=True, text=True, check=False
-    )
+    proc = subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise AssertionError(
             f"command failed: {' '.join(args)}\n"
@@ -48,7 +46,7 @@ def _sandbox_identity(tmp_path_factory: pytest.TempPathFactory) -> None:
         "\temail = test@example.invalid\n"
         "[init]\n"
         "\tdefaultBranch = main\n"
-        "[protocol \"file\"]\n"
+        '[protocol "file"]\n'
         # The lab uses file:// origins. Real remotes never need this.
         "\tallow = always\n"
         "[advice]\n"
@@ -242,9 +240,7 @@ class Checkout:
             self.jj(sub, "bookmark", "move", "main", "--to", head)
             self.jj(sub, "git", "push", "--bookmark", "main")
         else:
-            attached = run(
-                "git", "branch", "--show-current", cwd=self.sub(sub)
-            ).strip()
+            attached = run("git", "branch", "--show-current", cwd=self.sub(sub)).strip()
             if attached != "main":
                 # git refuses to force a branch that a worktree has checked out,
                 # and when main is checked out it already points at head anyway.

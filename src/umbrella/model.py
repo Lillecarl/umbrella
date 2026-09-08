@@ -56,7 +56,7 @@ class Sub:
     url: str
     workdir: Path
     recorded: Oid | None
-    declared: str | None   # submodule.<name>.branch from .gitmodules
+    declared: str | None  # submodule.<name>.branch from .gitmodules
     # This checkout leaves it to the lock. See skip.py: it changes what the
     # tool does, and nothing about how a source resolves.
     skipped: bool = False

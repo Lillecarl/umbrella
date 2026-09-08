@@ -25,8 +25,8 @@ from .model import UmbrellaError
 _GITHUB = "https://github.com/"
 
 # What the caller supplies.
-HeadOf = Callable[[str, str], str | None]     # url, branch -> revision
-Prefetch = Callable[[str, str, str], dict]    # owner, repo, revision -> node
+HeadOf = Callable[[str, str], str | None]  # url, branch -> revision
+Prefetch = Callable[[str, str, str], dict]  # owner, repo, revision -> node
 
 
 @dataclass(frozen=True)
@@ -34,9 +34,9 @@ class Change:
     """One line of the report."""
 
     name: str
-    was: str | None    # the revision the lock held, None when it held none
-    now: str | None    # the revision it holds now, None when the name is gone
-    where: str         # "pointer", or the branch the revision came from
+    was: str | None  # the revision the lock held, None when it held none
+    now: str | None  # the revision it holds now, None when the name is gone
+    where: str  # "pointer", or the branch the revision came from
 
     @property
     def dropped(self) -> bool:
