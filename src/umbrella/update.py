@@ -1,15 +1,13 @@
 """Which revision each source should be locked at.
 
-Two arms, and they are the two arms of the resolution they feed.
+Two arms, and each has one caller.
 
-**A submodule takes the commit the umbrella records.** Not its working copy and
-not its branch head. The lock and the pointer are the pair that has to agree,
-and the pointer is the one a push already made public. `umbrella status` reports
-that pair; this is what answers it.
+**A revision the caller already decided.** `land` passes what it just pushed,
+for the sources it pushed. Those are on their remotes and nothing here has to
+find them.
 
-**Everything else takes the head of the branch the specification names.** So a
-run over every name is a re-sync for the submodules and an update for the third
-parties.
+**The head of the branch the specification declares.** Everything else, which
+is what `update` asks for.
 
 Nothing here talks to git or to nix. The caller passes in the two things that
 do, so the decisions are testable without a network.
@@ -20,13 +18,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-from .model import UmbrellaError
-
-_GITHUB = "https://github.com/"
+from .errors import UmbrellaError
 
 # What the caller supplies.
 HeadOf = Callable[[str, str], str | None]  # url, branch -> revision
-Prefetch = Callable[[str, str, str], dict]  # owner, repo, revision -> node
+Prefetch = Callable[[str, str], dict]  # url, revision -> lock node
 
 
 @dataclass(frozen=True)
@@ -36,30 +32,11 @@ class Change:
     name: str
     was: str | None  # the revision the lock held, None when it held none
     now: str | None  # the revision it holds now, None when the name is gone
-    where: str  # "pointer", or the branch the revision came from
+    where: str  # "landed", or the branch the revision came from
 
     @property
     def dropped(self) -> bool:
         return self.now is None
-
-
-def github_slug(name: str, url: str) -> tuple[str, str]:
-    """The owner and the repository, out of a github url.
-
-    A lock node is a github node, and the resolution builds a
-    `github:owner/repo/rev` reference from it. A source hosted anywhere else
-    cannot be locked this way, and saying so beats writing a node that nothing
-    can read.
-    """
-    if not url.startswith(_GITHUB):
-        raise UmbrellaError(f"{name}: {url} is not on github, and a lock node is one")
-    slug = url[len(_GITHUB) :].strip("/")
-    if slug.endswith(".git"):
-        slug = slug[: -len(".git")]
-    owner, _, repo = slug.partition("/")
-    if not owner or not repo or "/" in repo:
-        raise UmbrellaError(f"{name}: {url} does not name one owner and one repository")
-    return owner, repo
 
 
 def rewrite(
@@ -96,9 +73,8 @@ def rewrite(
 
     for name in wanted:
         entry = spec[name]
-        owner, repo = github_slug(name, entry["url"])
         revision = pointers.get(name)
-        where = "pointer"
+        where = "landed"
         if revision is None:
             branch = entry["branch"]
             revision = head_of(entry["url"], branch)
@@ -106,7 +82,7 @@ def rewrite(
             if not revision:
                 raise UmbrellaError(f"{name}: {entry['url']} has no branch {branch}")
         was = (existing.get(name) or {}).get("rev")
-        node = prefetch(owner, repo, revision)
+        node = prefetch(entry["url"], revision)
         keep[name] = node
         if node.get("rev") != was:
             changes.append(Change(name=name, was=was, now=node.get("rev"), where=where))

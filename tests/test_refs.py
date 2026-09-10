@@ -1,4 +1,4 @@
-"""Choosing the branch that carries a submodule commit to its remote."""
+"""Choosing the branch that carries a source commit to its remote."""
 
 from __future__ import annotations
 
@@ -10,16 +10,21 @@ from umbrella import refs
 from umbrella.model import Umbrella
 
 
-def _choose(checkout: Checkout, name: str) -> refs.Choice:
+def _choose(checkout: Checkout, name: str, declared: str | None = None) -> refs.Choice:
     umbrella = checkout.umbrella()
-    sub = umbrella.sub(name)
-    assert sub is not None
-    return refs.choose(sub, sub.head(), checkout.backend().default_branch(sub))
+    source = umbrella.source(name)
+    assert source is not None
+    return refs.choose(
+        source,
+        source.head(),
+        checkout.backend().default_branch(source),
+        declared,
+    )
 
 
 def test_a_detached_checkout_reuses_its_local_branch(git_checkout: Checkout) -> None:
-    """A submodule checkout is detached, but the clone still left main behind."""
-    sub = git_checkout.sub("sub1")
+    """A working copy on the locked revision is detached, and main is still there."""
+    sub = git_checkout.at("sub1")
     before = run("git", "rev-parse", "main", cwd=sub).strip()
 
     git_checkout.edit("sub1", "v2")
@@ -35,9 +40,9 @@ def test_a_remote_only_branch_is_used_when_no_local_branch_exists(
     git_checkout: Checkout,
 ) -> None:
     """Some clones leave no local branch at all. Only origin/main says the name."""
-    sub = git_checkout.sub("sub1")
+    sub = git_checkout.at("sub1")
     run("git", "branch", "-D", "main", cwd=sub)
-    assert list(git_checkout.umbrella().sub("sub1").repo().branches.local) == []
+    assert list(git_checkout.umbrella().source("sub1").repo().branches.local) == []
 
     git_checkout.edit("sub1", "v2")
     run("git", "commit", "-qam", "v2", cwd=sub)
@@ -95,46 +100,15 @@ def test_a_branch_the_commit_does_not_build_on_is_not_a_candidate(
 
 @needs_jj
 def test_a_declared_branch_wins_over_everything(jj_checkout: Checkout) -> None:
-    """submodule.<name>.branch in .gitmodules settles it with no inference."""
+    """The `branch` in nix/sources.nix settles it with no inference."""
     jj_checkout.jj("sub1", "bookmark", "create", "release", "-r", "main")
     jj_checkout.jj("sub1", "git", "push", "--bookmark", "release")
-    run(
-        "git",
-        "config",
-        "-f",
-        ".gitmodules",
-        "submodule.sub1.branch",
-        "release",
-        cwd=jj_checkout.path,
-    )
-    run("git", "commit", "-qam", "declare a branch", cwd=jj_checkout.path)
 
     jj_checkout.edit("sub1", "v2")
     jj_checkout.commit_jj("sub1", "v2")
 
-    umbrella = jj_checkout.umbrella()
-    sub = umbrella.sub("sub1")
-    assert sub.declared == "release"
     # main would otherwise be ambiguous with release. The declaration removes it.
-    assert refs.choose(sub, sub.head(), None).name == "release"
-
-
-def test_a_dot_declaration_means_the_umbrella_own_branch(
-    git_checkout: Checkout,
-) -> None:
-    run(
-        "git",
-        "config",
-        "-f",
-        ".gitmodules",
-        "submodule.sub1.branch",
-        ".",
-        cwd=git_checkout.path,
-    )
-    run("git", "commit", "-qam", "declare dot", cwd=git_checkout.path)
-
-    sub = git_checkout.umbrella().sub("sub1")
-    assert sub.declared == "main"  # the umbrella is on main
+    assert _choose(jj_checkout, "sub1", "release").name == "release"
 
 
 @needs_jj
@@ -150,15 +124,18 @@ def test_a_declaration_resolves_an_ambiguity_that_would_otherwise_refuse(
     with pytest.raises(refs.NoBranch, match="feature, main"):
         _choose(jj_checkout, "sub1")
 
-    run(
-        "git",
-        "config",
-        "-f",
-        ".gitmodules",
-        "submodule.sub1.branch",
-        "main",
-        cwd=jj_checkout.path,
-    )
-    run("git", "commit", "-qam", "declare the branch", cwd=jj_checkout.path)
+    assert _choose(jj_checkout, "sub1", "main").name == "main"
 
-    assert _choose(jj_checkout, "sub1").name == "main"
+
+def test_no_declaration_is_read_when_nix_cannot_answer(
+    git_checkout: Checkout, monkeypatch
+) -> None:
+    """A checkout with no nix still lands. The declaration is a shortcut."""
+    from umbrella import nixcli
+    from umbrella.cli import _declared_branches
+
+    def missing(_workdir):
+        raise nixcli.NixError("nix is not here")
+
+    monkeypatch.setattr(nixcli, "spec", missing)
+    assert _declared_branches(git_checkout.umbrella()) == {}

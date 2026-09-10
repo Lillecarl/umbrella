@@ -11,11 +11,11 @@ from umbrella.kind import Kind
 
 def test_a_single_project_knows_what_it_is(single: Checkout) -> None:
     assert single.umbrella().kind is Kind.SINGLE
-    assert single.umbrella().subs() == []
+    assert single.umbrella().sources() == []
 
 
-def test_initjj_colocates_the_project_itself(single: Checkout) -> None:
-    """An umbrella colocates its submodules. A single project has only itself."""
+def test_init_jj_colocates_the_project_itself(single: Checkout) -> None:
+    """An umbrella colocates its working copies. A single project has only itself."""
     if single.mode != "jj":
         pytest.skip("git mode colocates nothing")
     assert (single.path / ".jj").is_dir()
@@ -28,11 +28,11 @@ def test_status_says_there_is_nothing_to_track(
 
     out = capsys.readouterr().out
     assert "single" in out
-    assert "no submodule pointers" in out
+    assert "no lock to track" in out
 
 
 def test_land_refuses_on_a_single_project(single: Checkout) -> None:
-    assert single.cli("land", "-m", "nothing to land") == 1
+    assert single.cli("land") == 1
 
 
 def test_sync_refuses_on_a_single_project(single: Checkout) -> None:
@@ -96,7 +96,7 @@ def test_a_wts_name_cannot_be_reused_while_it_exists(single: Checkout) -> None:
 
 
 def test_a_single_project_gets_no_hooks(single: Checkout) -> None:
-    """The guards only look at submodule pointers, and there are none.
+    """The guards only look at locked revisions, and there are none.
 
     Taking over core.hooksPath to install two hooks that can do nothing would
     disable whatever hooks the repo already has.
@@ -106,6 +106,8 @@ def test_a_single_project_gets_no_hooks(single: Checkout) -> None:
         single.umbrella().repo.config["core.hooksPath"]
 
 
-def test_a_single_project_is_not_given_submodule_config(single: Checkout) -> None:
-    with pytest.raises(KeyError):
-        single.umbrella().repo.config["submodule.recurse"]
+def test_a_single_project_is_not_given_an_ignore_block(single: Checkout) -> None:
+    """Nothing is fetched into it, so there is nothing to keep out."""
+    from umbrella import ignore
+
+    assert not (single.path / ignore.FILE).exists()

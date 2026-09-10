@@ -34,6 +34,9 @@ buildPythonApplication {
   # The suite builds real repositories in the sandbox, with bare origins over
   # file paths. It needs both binaries, and jujutsu here is a test dependency
   # only: the program itself never assumes jj is installed.
+  #
+  # nix is deliberately not here. The two commands that need it are answered
+  # from the lab instead: the sandbox has no network, and recursive nix is off.
   nativeCheckInputs = [
     pytestCheckHook
     git
@@ -48,7 +51,7 @@ buildPythonApplication {
   '';
 
   meta = {
-    description = "Drive an umbrella git repo whose submodules are separate projects";
+    description = "Drive a repo whose nix/sources.lock names other projects";
     mainProgram = "umbrella";
     maintainers = [ lib.maintainers.lillecarl ];
   };

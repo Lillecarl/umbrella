@@ -188,7 +188,7 @@ def test_create_excludes_its_directory_from_a_linked_worktree(
     """
     project = tmp_path / "proj"
     run("git", "clone", "-q", str(lab.origin("sub1")), str(project))
-    assert Checkout(project).cli("initgit") == 0
+    assert Checkout(project).cli("init") == 0
 
     linked = tmp_path / "proj-linked"
     run("git", "worktree", "add", "-q", "-b", "linked", str(linked), cwd=project)

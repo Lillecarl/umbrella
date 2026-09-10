@@ -38,16 +38,14 @@ def capture(cwd: Path, *args: str) -> str:
     return proc.stdout
 
 
-def submodule_clone(umbrella: Path, paths: list[str]) -> None:
-    """Clone the named submodules.
+def clone(cwd: Path, url: str, dest: Path) -> None:
+    """Clone a source beside the umbrella.
 
-    Never pass a path that is already checked out. git submodule update runs a
-    checkout, and in jj mode that writes over the jj working copy and skips the
-    jj operation log.
+    `cwd` decides nothing about the answer; it only puts the command inside the
+    checkout whose configuration holds any url rewrite the user set, so
+    somebody who pushes over SSH clones over SSH.
     """
-    if not paths:
-        return
-    run(umbrella, "submodule", "update", "--init", "--", *paths)
+    run(cwd, "clone", "--quiet", url, str(dest))
 
 
 def fetch(repo: Path) -> None:

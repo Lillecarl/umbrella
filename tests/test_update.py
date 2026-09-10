@@ -4,6 +4,10 @@
 nodes survive. Neither decision needs a network, because the two things that do
 are passed in. The one place the real `nix` output format is checked is
 `parse_prefetch`, against output captured from a real run.
+
+`update` follows the branch each source declares. `land` passes in what it just
+pushed. Those are the two arms, and they are two commands on purpose: one
+follows the forge, the other publishes this disk.
 """
 
 from __future__ import annotations
@@ -52,7 +56,7 @@ def node(rev: str, owner: str = "who", repo: str = "what") -> dict:
     }
 
 
-def prefetcher(_owner: str, _repo: str, rev: str) -> dict:
+def prefetcher(_url: str, rev: str) -> dict:
     """Stands in for nix. It only has to give the revision back in a node."""
     return node(rev)
 
@@ -97,7 +101,7 @@ def test_parse_prefetch_refuses_output_with_no_hash() -> None:
         nixcli.parse_prefetch(json.dumps({"locked": {"rev": A}}))
 
 
-# -- reading a url ----------------------------------------------------------
+# -- building a reference --------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -106,30 +110,31 @@ def test_parse_prefetch_refuses_output_with_no_hash() -> None:
         "https://github.com/who/what.git",
         "https://github.com/who/what",
         "https://github.com/who/what/",
+        "git@github.com:who/what.git",
     ],
 )
-def test_github_slug_reads_owner_and_repository(url: str) -> None:
-    assert update.github_slug("n", url) == ("who", "what")
+def test_a_github_url_becomes_a_github_reference(url: str) -> None:
+    """It has to match what nix/resolve.nix builds from a github node."""
+    assert nixcli.reference(url, A) == f"github:who/what/{A}"
 
 
 @pytest.mark.parametrize(
     "url",
     [
         "https://gitlab.com/who/what.git",
-        "git@github.com:who/what.git",
+        "file:///tmp/what.git",
         "https://github.com/who",
-        "https://github.com/who/what/deeper",
     ],
 )
-def test_github_slug_refuses_what_a_lock_node_cannot_hold(url: str) -> None:
-    with pytest.raises(UmbrellaError):
-        update.github_slug("n", url)
+def test_any_other_url_becomes_a_git_reference(url: str) -> None:
+    """A source off github is still lockable. resolve.nix reads a git node."""
+    assert nixcli.reference(url, A) == f"git+{url}?rev={A}"
 
 
 # -- which revision ---------------------------------------------------------
 
 
-def test_a_submodule_takes_the_pointer_and_asks_no_remote() -> None:
+def test_a_revision_the_caller_decided_asks_no_remote() -> None:
     sources, changes = update.rewrite(
         spec={"sub1": SPEC["sub1"]},
         pointers={"sub1": A},
@@ -140,7 +145,7 @@ def test_a_submodule_takes_the_pointer_and_asks_no_remote() -> None:
 
     assert sources["sub1"]["rev"] == A
     assert [(c.name, c.was, c.now, c.where) for c in changes] == [
-        ("sub1", None, A, "pointer")
+        ("sub1", None, A, "landed")
     ]
 
 
@@ -263,176 +268,98 @@ def test_write_sorts_the_whole_file(tmp_path: Path) -> None:
 
 
 # -- through the command line ----------------------------------------------
+#
+# `nix_free` answers for nix here, from the lab. Every other decision is made
+# against the real repositories the lab builds.
 
 
-def test_update_locks_the_recorded_pointer_and_not_the_working_copy(
-    checkout: Checkout, capsys: pytest.CaptureFixture[str], monkeypatch
+def test_update_follows_the_branch_and_not_the_working_copy(
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The whole command, with nix faked out.
-
-    The submodule is moved on and committed but not landed, so its HEAD and its
-    pointer differ. The lock has to take the pointer: nothing else is public.
-    """
-    monkeypatch.setattr(
-        nixcli,
-        "spec",
-        lambda _workdir: {
-            "sub1": {"url": "https://github.com/who/sub1.git", "branch": "main"},
-        },
-    )
-    monkeypatch.setattr(
-        nixcli, "prefetch", lambda _workdir, owner, repo, rev: node(rev, owner, repo)
-    )
-
-    recorded = checkout.recorded("sub1")
+    """A commit that is only on this disk is not what a clone would get."""
+    before = checkout.locked("sub1")
     checkout.edit("sub1", "v2")
     head = checkout.commit("sub1", "v2")
-    assert head != recorded
+    assert head != before
 
     assert checkout.cli("update") == 0
 
-    assert capsys.readouterr().out.count("(pointer)") == 1
-    assert str(lock.read(checkout.path)["sub1"]) == recorded
+    assert "nothing moved" in capsys.readouterr().out
+    assert str(lock.read(checkout.path)["sub1"]) == before
+
+
+def test_update_takes_a_branch_head_somebody_else_pushed(
+    lab: Lab, checkout: Checkout
+) -> None:
+    moved = lab.push_from_elsewhere("sub1", "from somewhere else")
+
+    assert checkout.cli("update", "sub1") == 0
+
+    assert str(lock.read(checkout.path)["sub1"]) == moved
 
 
 def test_update_dry_run_writes_nothing(
-    checkout: Checkout, capsys: pytest.CaptureFixture[str], monkeypatch
+    lab: Lab, checkout: Checkout, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(
-        nixcli,
-        "spec",
-        lambda _workdir: {
-            "sub1": {"url": "https://github.com/who/sub1.git", "branch": "main"},
-        },
-    )
-    monkeypatch.setattr(
-        nixcli, "prefetch", lambda _workdir, owner, repo, rev: node(rev, owner, repo)
-    )
+    before = checkout.locked("sub1")
+    lab.push_from_elsewhere("sub1", "from somewhere else")
 
     assert checkout.cli("update", "--dry-run") == 0
 
     assert "--dry-run" in capsys.readouterr().out
-    assert not (checkout.path / lock.PATH).exists()
+    assert checkout.locked("sub1") == before
 
 
 def test_update_says_so_when_nothing_moved(
-    checkout: Checkout, capsys: pytest.CaptureFixture[str], monkeypatch
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(
-        nixcli,
-        "spec",
-        lambda _workdir: {
-            "sub1": {"url": "https://github.com/who/sub1.git", "branch": "main"},
-        },
-    )
-    monkeypatch.setattr(
-        nixcli, "prefetch", lambda _workdir, owner, repo, rev: node(rev, owner, repo)
-    )
-
     assert checkout.cli("update") == 0
-    capsys.readouterr()
-    assert checkout.cli("update") == 0
-
     assert "nothing moved" in capsys.readouterr().out
 
 
-def test_update_clears_the_row_that_status_shows(
-    checkout: Checkout, capsys: pytest.CaptureFixture[str], monkeypatch
-) -> None:
-    """The two commands are one loop: status reports the drift, update ends it."""
-    monkeypatch.setattr(
-        nixcli,
-        "spec",
-        lambda _workdir: {
-            "sub1": {"url": "https://github.com/who/sub1.git", "branch": "main"},
-        },
-    )
-    monkeypatch.setattr(
-        nixcli, "prefetch", lambda _workdir, owner, repo, rev: node(rev, owner, repo)
-    )
-
-    stale = checkout.recorded("sub1")
-    assert checkout.cli("update") == 0
-    checkout.edit("sub1", "v2")
-    checkout.commit("sub1", "v2")
-    assert checkout.cli("land", "-m", "bump sub1") == 0
-    capsys.readouterr()
-
-    assert checkout.cli("status") == 0
-    assert f"lock-names-{stale[:8]}" in capsys.readouterr().out
-
-    assert checkout.cli("update") == 0
-    capsys.readouterr()
-    assert checkout.cli("status") == 0
-    assert "lock-names" not in capsys.readouterr().out
-
-
-def test_land_names_the_source_whose_lock_it_left_behind(
+def test_land_writes_the_lock_for_what_it_pushed(
     checkout: Checkout, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """land is what creates the drift, so it is where saying so costs least."""
-    lock.write(checkout.path, {"sub1": node(checkout.recorded("sub1"))})
+    """land is the other arm: it publishes this disk, then locks that."""
+    checkout.edit("sub1", "v2")
+    landed = checkout.commit("sub1", "v2")
+
+    assert checkout.cli("land") == 0
+
+    assert checkout.locked("sub1") == landed
+    assert "(landed)" in capsys.readouterr().out
+
+
+def test_land_leaves_a_source_it_did_not_push_alone(
+    lab: Lab, checkout: Checkout
+) -> None:
+    """A limited run may not drop or move a node it was never told about."""
+    moved = lab.push_from_elsewhere("sub2", "from somewhere else")
+    before = checkout.locked("sub2")
     checkout.edit("sub1", "v2")
     checkout.commit("sub1", "v2")
 
-    assert checkout.cli("land", "-m", "bump sub1") == 0
+    assert checkout.cli("land") == 0
 
-    out = capsys.readouterr().out
-    assert "umbrella update sub1" in out
-
-
-def test_land_says_nothing_when_there_is_no_lock(
-    checkout: Checkout, capsys: pytest.CaptureFixture[str]
-) -> None:
-    checkout.edit("sub1", "v2")
-    checkout.commit("sub1", "v2")
-
-    assert checkout.cli("land", "-m", "bump sub1") == 0
-
-    assert "umbrella update" not in capsys.readouterr().out
-
-
-def test_land_says_nothing_when_the_lock_keeps_up(
-    checkout: Checkout, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """A lock already naming the commit being landed is not a drift."""
-    checkout.edit("sub1", "v2")
-    head = checkout.commit("sub1", "v2")
-    lock.write(checkout.path, {"sub1": node(head)})
-
-    assert checkout.cli("land", "-m", "bump sub1") == 0
-
-    assert "umbrella update" not in capsys.readouterr().out
+    assert checkout.locked("sub2") == before != moved
 
 
 def test_update_needs_a_specification(
-    checkout: Checkout, capsys: pytest.CaptureFixture[str]
+    lab: Lab, capsys: pytest.CaptureFixture[str], monkeypatch
 ) -> None:
-    """There is no nix/sources.nix in the lab, and nix is not in the sandbox.
-    The command has to say the first thing before it reaches the second."""
+    """Without one there is nothing to follow, and it has to say so."""
+    from umbrella.nixcli import NixError
+
+    def missing(_workdir):
+        raise NixError(f"there is no {nixcli.SPEC} here")
+
+    monkeypatch.setattr(nixcli, "spec", missing)
+    checkout = Checkout(lab.clone("nospec"))
+
     assert checkout.cli("update") == 1
     assert nixcli.SPEC in capsys.readouterr().err
 
 
-def test_a_single_project_follows_every_branch(
-    lab: Lab, capsys: pytest.CaptureFixture[str], monkeypatch
-) -> None:
-    """No submodules means no pointers, so every source takes its branch."""
-    monkeypatch.setattr(
-        nixcli,
-        "spec",
-        lambda _workdir: {
-            "dep": {"url": "https://github.com/who/dep.git", "branch": "main"},
-        },
-    )
-    monkeypatch.setattr(
-        nixcli, "prefetch", lambda _workdir, owner, repo, rev: node(rev, owner, repo)
-    )
-    monkeypatch.setattr("umbrella.gitcli.remote_head", lambda _cwd, _url, _branch: A)
-
-    single = Checkout(lab.root / "_seed-sub1")
-
-    assert single.cli("update") == 0
-
-    assert "(main)" in capsys.readouterr().out
-    assert str(lock.read(single.path)["dep"]) == A
+def test_update_refuses_on_a_single_project(single: Checkout) -> None:
+    """It locks nothing, so there is nothing to follow."""
+    assert single.cli("update") == 1

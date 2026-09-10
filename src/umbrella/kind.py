@@ -1,13 +1,17 @@
 """Whether this repo is an umbrella or a single project.
 
 Most repos are not umbrellas, and umbrella works on those too: a plain repo
-just has no submodules to coordinate. The difference decides what a worktree
-means. For a single project it is one more working copy. For an umbrella it is
-the whole constellation.
+just locks nothing. The difference decides what a worktree means. For a single
+project it is one more working copy. For an umbrella it is the whole
+constellation.
 
-Detection is automatic. A repo with submodules is an umbrella, and one without
-is not. The marker only overrides that, for a repo whose submodules are vendored
-dependencies rather than projects worked on together. It lives in .git, so the
+Detection is automatic. A repo with a Nix lock coordinates the sources that
+lock names, and a repo without one coordinates nobody. That is the whole test,
+and it is deliberate that a project which grows a lock becomes an umbrella:
+locking a sibling is what an umbrella is for.
+
+The marker only overrides that, for a repo whose lock is a build artefact
+rather than a set of projects worked on together. It lives in .git, so the
 override is per checkout and never committed.
 """
 
@@ -32,10 +36,12 @@ def _marker(repo: pygit2.Repository) -> Path:
 
 def detect(repo: pygit2.Repository) -> Kind:
     """What this repo looks like, ignoring any override."""
+    from . import lock
+
     workdir = repo.workdir
-    if workdir is None or not (Path(workdir) / ".gitmodules").exists():
+    if workdir is None:
         return Kind.SINGLE
-    return Kind.UMBRELLA if any(repo.submodules) else Kind.SINGLE
+    return Kind.UMBRELLA if (Path(workdir) / lock.PATH).is_file() else Kind.SINGLE
 
 
 def read(repo: pygit2.Repository) -> Kind:

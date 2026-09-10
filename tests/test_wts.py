@@ -1,4 +1,4 @@
-"""Worktrees: a throwaway checkout of the whole constellation."""
+"""Worktreespaces: a throwaway checkout of the whole constellation."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def test_a_worktree_is_a_working_constellation(checkout: Checkout) -> None:
     for name in ("sub1", "sub2"):
         assert (tree / name / "file.txt").read_text() == f"{name} v1\n"
         assert (tree / name / "file.txt").read_text() == (
-            checkout.sub(name) / "file.txt"
+            checkout.at(name) / "file.txt"
         ).read_text()
 
 
@@ -40,7 +40,7 @@ def test_an_umbrella_worktree_does_not_publish(checkout: Checkout) -> None:
     assert checkout.cli("wts", "add", "poc") == 0
     inside = Checkout(_wts_path(checkout, "poc"))
 
-    assert inside.cli("land", "-m", "from a worktree") == 1
+    assert inside.cli("land") == 1
 
 
 def test_a_worktree_cannot_spawn_another(checkout: Checkout) -> None:
@@ -67,12 +67,12 @@ def test_a_worktree_refuses_a_path_that_is_taken(checkout: Checkout) -> None:
 
 
 @needs_jj
-def test_a_jj_worktree_shares_the_submodule_repo(jj_checkout: Checkout) -> None:
+def test_a_jj_worktree_shares_the_source_repo(jj_checkout: Checkout) -> None:
     """It is a workspace, not a second clone. That is what makes it cheap."""
     assert jj_checkout.cli("wts", "add", "poc") == 0
 
     listed = run(
-        "jj", "--no-pager", "-R", str(jj_checkout.sub("sub1")), "workspace", "list"
+        "jj", "--no-pager", "-R", str(jj_checkout.at("sub1")), "workspace", "list"
     )
     assert "poc:" in listed
 
@@ -95,12 +95,13 @@ def test_work_in_a_worktree_shows_up_in_the_source_status(
 
 
 def test_a_wts_can_be_made_from_an_older_umbrella_commit(checkout: Checkout) -> None:
-    """The pointers come from that commit, not from what is checked out now."""
-    was = checkout.recorded("sub1")
+    """The revisions come from that commit's lock, not from the one on disk."""
+    was = checkout.locked("sub1")
     checkout.edit("sub1", "v2")
     checkout.commit("sub1", "v2")
-    assert checkout.cli("land", "-m", "bump sub1") == 0
-    assert checkout.recorded("sub1") != was
+    assert checkout.cli("land") == 0
+    checkout.publish_umbrella("bump sub1")
+    assert checkout.locked("sub1") != was
 
     assert checkout.cli("wts", "add", "before", "-r", "HEAD~1") == 0
 
@@ -108,7 +109,7 @@ def test_a_wts_can_be_made_from_an_older_umbrella_commit(checkout: Checkout) -> 
     # and git rev-parse inside one resolves to the umbrella above it.
     tree = _wts_path(checkout, "before")
     assert (tree / "sub1" / "file.txt").read_text() == "sub1 v1\n"
-    assert (checkout.sub("sub1") / "file.txt").read_text() == "v2\n"
+    assert (checkout.at("sub1") / "file.txt").read_text() == "v2\n"
 
 
 def test_a_wts_from_a_revision_that_does_not_exist_is_refused(
@@ -136,18 +137,17 @@ def test_a_jj_workspace_counts_as_a_working_copy(jj_checkout: Checkout) -> None:
     tree = _wts_path(jj_checkout, "poc")
 
     inside = Checkout(tree).umbrella()
-    for sub in inside.subs():
-        assert not (sub.workdir / ".git").exists()
-        assert sub.present
+    for source in inside.sources():
+        assert not (source.workdir / ".git").exists()
+        assert source.present
 
 
 def test_status_in_a_worktreespace_says_what_it_is(
     checkout: Checkout, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """It must not claim the submodules are missing, nor advise an init.
+    """It must not claim the working copies are missing, nor advise a fetch.
 
-    Following that advice would run git submodule update over live jj
-    workspaces.
+    Following that advice would clone over live jj workspaces.
     """
     assert checkout.cli("wts", "add", "poc") == 0
     capsys.readouterr()
@@ -156,8 +156,8 @@ def test_status_in_a_worktreespace_says_what_it_is(
 
     out = capsys.readouterr().out
     assert "worktreespace poc" in out
-    assert "not checked out" not in out
-    assert "initgit" not in out
+    assert "no working copy" not in out
+    assert "umbrella fetch" not in out
 
 
 def test_sync_in_a_worktreespace_refuses(checkout: Checkout) -> None:
