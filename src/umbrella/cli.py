@@ -123,7 +123,7 @@ def cmd_init(umbrella: Umbrella, backend: Backend, args) -> int:
     if umbrella.kind is Kind.UMBRELLA:
         _adopt_old_submodules(umbrella)
         names = [source.name for source in umbrella.sources()]
-        if ignore.write(umbrella.workdir, names):
+        if ignore.write(umbrella.repo, names):
             print(f"ignore: {ignore.FILE} lists {len(names)} source directories")
 
     if chosen is Mode.JJ:
@@ -195,7 +195,7 @@ def cmd_fetch(umbrella: Umbrella, backend: Backend, args) -> int:
     if unknown:
         _die(f"{lock.PATH} names no {', '.join(sorted(unknown))}")
 
-    ignore.write(umbrella.workdir, sorted(sources))
+    ignore.write(umbrella.repo, sorted(sources))
 
     for name in wanted:
         source = sources[name]

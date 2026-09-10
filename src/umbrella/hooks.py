@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pygit2
 
+from . import ignore
+
 HOOKS_DIR = ".githooks"
 EXE_MARKER = "umbrella-exe"
 
@@ -48,28 +50,13 @@ def executable() -> str:
     return override if override else os.path.realpath(sys.argv[0])
 
 
-def common_dir(repo: pygit2.Repository) -> Path:
-    """The git directory shared by every worktree of this repo.
-
-    A linked worktree has its own git directory holding HEAD, the index and
-    such, plus a commondir file pointing back at the shared one.
-    """
-    path = Path(repo.path)
-    pointer = path / "commondir"
-    if not pointer.exists():
-        return path
-    return (path / pointer.read_text().strip()).resolve()
-
-
 def exclude(repo: pygit2.Repository, entry: str) -> None:
     """Ignore something locally.
 
     Generated files do not belong in the project's .gitignore, and the exclude
-    file is never committed. It has to go in the common git directory: git
-    reads info/exclude only from there, so writing it into a linked worktree's
-    own git directory silently does nothing.
+    file is never committed.
     """
-    path = common_dir(repo) / "info" / "exclude"
+    path = ignore.common_dir(repo) / ignore.FILE
     path.parent.mkdir(exist_ok=True)
     lines = path.read_text().splitlines() if path.exists() else []
     if entry not in lines:

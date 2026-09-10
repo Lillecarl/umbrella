@@ -14,7 +14,9 @@ ends up naming, is made against the real repositories.
 them. A clone of that umbrella has no working copies, which is the normal shape:
 a source resolves from the lock until somebody runs `umbrella fetch`.
 `git_checkout` and `jj_checkout` each clone the umbrella, initialise it in one
-mode and fetch both sources. `Checkout.cli()` runs the command line in process
+mode and fetch both sources. The seed umbrella commits no `.gitignore`: the
+working copies are excluded through `.git/info/exclude`, which is per checkout
+and never committed. `Checkout.cli()` runs the command line in process
 from inside the checkout, and the hook tests call `git` itself, so the hooks run
 the way git runs them.
 

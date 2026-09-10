@@ -26,8 +26,6 @@ from pathlib import Path
 
 import pytest
 
-from umbrella import ignore
-
 HAS_JJ = shutil.which("jj") is not None
 needs_jj = pytest.mark.skipif(not HAS_JJ, reason="jj is not installed")
 
@@ -189,10 +187,6 @@ def lab(tmp_path: Path) -> Lab:
         + "}\n"
     )
     write_lock(seed, {name: node(made.url(name), rev) for name, rev in seeded.items()})
-    # A real umbrella commits this, and `init` only keeps it current. Seeding
-    # it here is what makes a plain `git pull` work in a checkout that has
-    # fetched a working copy.
-    ignore.write(seed, list(SOURCES))
     run("git", "add", ".", cwd=seed)
     run("git", "commit", "-qm", "seed umbrella", cwd=seed)
     run("git", "remote", "add", "origin", str(made.origin("umbrella")), cwd=seed)

@@ -9,7 +9,7 @@ import pytest
 
 from conftest import Checkout, Lab, needs_jj, run
 
-from umbrella import ignore, mode
+from umbrella import mode
 from umbrella.kind import Kind
 from umbrella.model import Umbrella
 
@@ -65,12 +65,35 @@ def test_a_working_copy_is_ignored_by_the_umbrella(git_checkout: Checkout) -> No
     Nothing records it, so nothing must add it either. One `git add .` in the
     umbrella would otherwise commit another project's tree.
     """
-    text = (git_checkout.path / ignore.FILE).read_text()
-    assert "/sub1/" in text and "/sub2/" in text
-
     git_checkout.git("add", ".")
     staged = git_checkout.git("diff", "--cached", "--name-only")
     assert "sub1/" not in staged
+
+
+def test_the_ignore_list_is_never_committed(git_checkout: Checkout) -> None:
+    """It is derived from the lock, so a committed copy would be a second
+    record of what the lock already says -- written by a tool, read as a diff.
+    """
+    from umbrella import ignore
+
+    written = ignore.common_dir(git_checkout.umbrella().repo) / ignore.FILE
+    assert "/sub1/" in written.read_text()
+    assert not (git_checkout.path / ".gitignore").exists()
+    assert git_checkout.git("status", "--porcelain") == ""
+
+
+def test_every_locked_name_is_excluded_not_only_the_fetched_ones(
+    lab: Lab,
+) -> None:
+    """So a source cloned here by hand later is covered by the same run."""
+    from umbrella import ignore
+
+    checkout = Checkout(lab.clone("nothing-fetched"))
+    assert checkout.cli("init") == 0
+
+    written = ignore.common_dir(checkout.umbrella().repo) / ignore.FILE
+    text = written.read_text()
+    assert "/sub1/" in text and "/sub2/" in text
 
 
 def test_init_is_git_mode_by_default(git_checkout: Checkout) -> None:
