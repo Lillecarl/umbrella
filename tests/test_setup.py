@@ -97,20 +97,20 @@ def test_every_locked_name_is_excluded_not_only_the_fetched_ones(
 
 
 def test_init_is_git_mode_by_default(git_checkout: Checkout) -> None:
-    assert mode.read(git_checkout.umbrella().repo) is mode.Mode.GIT
+    assert mode.read(git_checkout.umbrella().markers) is mode.Mode.GIT
     assert not (git_checkout.at("sub1") / ".jj").exists()
 
 
 @needs_jj
 def test_init_jj_colocates_every_working_copy(jj_checkout: Checkout) -> None:
-    assert mode.read(jj_checkout.umbrella().repo) is mode.Mode.JJ
+    assert mode.read(jj_checkout.umbrella().markers) is mode.Mode.JJ
     for name in ("sub1", "sub2"):
         assert (jj_checkout.at(name) / ".jj").is_dir()
 
 
 @needs_jj
 def test_the_mode_marker_is_never_committed(jj_checkout: Checkout) -> None:
-    assert (Path(jj_checkout.umbrella().repo.path) / mode.MARKER).exists()
+    assert (jj_checkout.umbrella().markers / mode.MARKER).exists()
     assert "umbrella-mode" not in jj_checkout.git("status", "--porcelain")
 
 

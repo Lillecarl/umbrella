@@ -58,7 +58,7 @@ def _open() -> tuple[Umbrella, Backend]:
     except UmbrellaError as error:
         _die(str(error))
         raise
-    return umbrella, backends.for_mode(mode.read(umbrella.repo))
+    return umbrella, backends.for_mode(mode.read(umbrella.markers))
 
 
 def _hints(backend: Backend, sources: list[Source]) -> None:
@@ -150,8 +150,8 @@ def cmd_init(umbrella: Umbrella, backend: Backend, args) -> int:
                 print(f"{source.name:<{NAME_COLUMN}} tracking {bookmark}")
 
     _install(umbrella)
-    mode.write(umbrella.repo, chosen)
-    print(f"mode:   {chosen} (marker in .git, never committed)")
+    mode.write(umbrella.markers, chosen)
+    print(f"mode:   {chosen} (marker in {umbrella.markers.name}, never committed)")
 
     missing = [s.name for s in umbrella.sources() if not s.present]
     if missing:
@@ -165,14 +165,14 @@ def cmd_init(umbrella: Umbrella, backend: Backend, args) -> int:
 
 def cmd_mode(umbrella: Umbrella, _backend: Backend, args) -> int:
     if args.value is None:
-        print(mode.read(umbrella.repo))
+        print(mode.read(umbrella.markers))
         return 0
     chosen = Mode(args.value)
     if chosen is Mode.JJ:
         missing = [s.name for s in umbrella.sources() if s.present and not s.colocated]
         if missing:
             _die(f"not colocated yet: {', '.join(missing)}. Run: umbrella init --jj")
-    mode.write(umbrella.repo, chosen)
+    mode.write(umbrella.markers, chosen)
     print(f"mode: {chosen}")
     return 0
 
@@ -253,24 +253,24 @@ def _create(
         return
 
     if (umbrella.workdir / ".jj").is_dir():
-        # A jj workspace has no .git of its own, and every marker this writes
-        # into the new checkout -- the worktreespace name, the mode, the kind --
-        # lives in one. Without them `umbrella` inside the new directory would
-        # discover this checkout's .git and answer for the wrong tree, which is
-        # worse than not making it. `jj workspace add` still works by hand; the
-        # sources beside it are ordinary clones and need nothing.
-        raise UmbrellaError(
-            "this umbrella is a jj repo, and a worktreespace of one cannot hold "
-            "the markers umbrella needs. Use jj workspace add."
-        )
-
-    # The umbrella is plain git whichever mode drives the sources.
-    gitcli.worktree_add(umbrella.workdir, path, f"worktree/{name}", revision)
-    made = Umbrella.open(path)
-    wts.write(made.repo, name)
-    mode.write(made.repo, backend.mode)
-    kind.write(made.repo, Kind.UMBRELLA)
-    hooks.install(made.repo)
+        # A jj umbrella makes a workspace of itself, not a git worktree. The
+        # markers go in the workspace's `.jj`, which is the one directory it
+        # has of its own -- see `Umbrella.markers`. Hooks are skipped: they are
+        # git hooks, the workspace has no `.git`, and a worktreespace does not
+        # publish anyway.
+        jj.workspace_add(umbrella.workdir, name, path, revision)
+        made = Umbrella.open(path)
+        wts.write(made.markers, name)
+        mode.write(made.markers, backend.mode)
+        kind.write(made.markers, Kind.UMBRELLA)
+    else:
+        # The umbrella is plain git whichever mode drives the sources.
+        gitcli.worktree_add(umbrella.workdir, path, f"worktree/{name}", revision)
+        made = Umbrella.open(path)
+        wts.write(made.markers, name)
+        mode.write(made.markers, backend.mode)
+        kind.write(made.markers, Kind.UMBRELLA)
+        hooks.install(made.repo)
 
     # The revisions come from the commit being checked out, not from the
     # working copy, so a worktreespace of an older umbrella gets the sources of
@@ -294,20 +294,25 @@ def _destroy(umbrella: Umbrella, backend: Backend, name: str, path: Path) -> Non
             except (jj.JjError, gitcli.GitError) as error:
                 # Removing what is left matters more than one already gone.
                 _to_stderr(f"{source.name:<{NAME_COLUMN}} {str(error).splitlines()[0]}")
-        gitcli.worktree_remove(umbrella.workdir, path)
-        left = gitcli.drop_branch(umbrella.workdir, f"worktree/{name}")
-        if left is not None:
-            _to_stderr(
-                f"worktree/{name} held {str(left)[:SHORT_ID]}, which is on no other "
-                "branch. It is still in the reflog."
-            )
+        if (umbrella.workdir / ".jj").is_dir():
+            # The umbrella's own extra working copy is a workspace here, and
+            # a workspace carries no branch to drop after it.
+            jj.workspace_forget(umbrella.workdir, name)
+        else:
+            gitcli.worktree_remove(umbrella.workdir, path)
+            left = gitcli.drop_branch(umbrella.workdir, f"worktree/{name}")
+            if left is not None:
+                _to_stderr(
+                    f"worktree/{name} held {str(left)[:SHORT_ID]}, which is on no "
+                    "other branch. It is still in the reflog."
+                )
     else:
         backend.drop_working_copy(umbrella.workdir, path, name)
     shutil.rmtree(path, ignore_errors=True)
 
 
 def cmd_wts_add(umbrella: Umbrella, backend: Backend, args) -> int:
-    if wts.read(umbrella.repo) is not None:
+    if wts.read(umbrella.markers) is not None:
         _die(
             "this is already a worktreespace. Make the next one from the "
             "checkout it came from."
@@ -331,7 +336,7 @@ def cmd_wts_list(umbrella: Umbrella, _backend: Backend, _args) -> int:
             other = Umbrella.open(path)
         except UmbrellaError:
             continue
-        name = wts.read(other.repo)
+        name = wts.read(other.markers)
         print(f"{name or '-':<{WTS_COLUMN}} {path}")
     for name in backend_workspaces(umbrella, _backend):
         print(f"{name:<{WTS_COLUMN}} (workspace)")
@@ -346,7 +351,7 @@ def backend_workspaces(umbrella: Umbrella, backend: Backend) -> list[str]:
 
 
 def cmd_wts_rm(umbrella: Umbrella, backend: Backend, args) -> int:
-    if wts.read(umbrella.repo) is not None:
+    if wts.read(umbrella.markers) is not None:
         _die("run this from the checkout the worktreespace came from, not inside it.")
     path = _wts_path(umbrella, args.name, args.path)
     _destroy(umbrella, backend, args.name, path)
@@ -439,7 +444,7 @@ def cmd_kind(umbrella: Umbrella, _backend: Backend, args) -> int:
     if args.value is None:
         print(umbrella.kind)
         return 0
-    kind.write(umbrella.repo, Kind(args.value))
+    kind.write(umbrella.markers, Kind(args.value))
     print(f"kind: {args.value}")
     return 0
 
@@ -454,7 +459,7 @@ def _worktreespace_note(umbrella: Umbrella) -> str | None:
     no HEAD to compare against what the lock names. Saying "not fetched" there
     would be wrong.
     """
-    name = wts.read(umbrella.repo)
+    name = wts.read(umbrella.markers)
     if name is None:
         return None
     return (
@@ -639,7 +644,7 @@ def _declared_branches(umbrella: Umbrella) -> dict[str, str]:
 def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
     """Push each working copy, then lock the sources at what was pushed."""
     _needs_umbrella(umbrella, "land")
-    name = wts.read(umbrella.repo)
+    name = wts.read(umbrella.markers)
     if name is not None:
         _die(
             f"this is the worktreespace {name}, which is for throwaway work, so "

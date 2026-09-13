@@ -9,6 +9,7 @@ from pathlib import Path
 import pygit2
 from pygit2 import Oid, Repository
 
+from . import jj
 from .errors import UmbrellaError
 from .kind import Kind
 from pygit2.enums import RepositoryOpenFlag
@@ -124,13 +125,29 @@ class Umbrella:
     depends on which, because the umbrella records nothing but a text file.
     """
 
-    def __init__(self, repo: Repository) -> None:
+    def __init__(self, repo: Repository, workdir: Path | None = None) -> None:
         self.repo = repo
-        self.workdir = Path(repo.workdir)
+        self.workdir = Path(workdir) if workdir is not None else Path(repo.workdir)
 
     @classmethod
     def open(cls, start: Path | None = None) -> "Umbrella":
-        found = pygit2.discover_repository(str(start or Path.cwd()))
+        here = (start or Path.cwd()).resolve()
+        workspace = jj.workspace_root(here)
+        if workspace is not None:
+            # A jj workspace has no .git of its own, and git discovery would
+            # walk straight past it -- to nothing, or worse, to a parent that
+            # answers for a different tree. `.jj/repo` names the repository,
+            # and its store names the colocated git directory.
+            found = jj.git_dir_of(workspace)
+            if found is None:
+                raise UmbrellaError(
+                    f"{workspace} is a jj workspace of a repo with no git "
+                    "backing. umbrella reads git, so colocate it: "
+                    "jj git init --colocate."
+                )
+            return cls(Repository(str(found)), workdir=workspace)
+
+        found = pygit2.discover_repository(str(here))
         if found is None:
             raise UmbrellaError(
                 "not inside a git repo. A jj repo works too, if it is colocated: "
@@ -142,10 +159,24 @@ class Umbrella:
         return cls(repo)
 
     @property
+    def markers(self) -> Path:
+        """Where this working copy's own markers live.
+
+        The mode, the kind and the worktreespace name are per checkout, so they
+        go beside that checkout's repository state and never in a shared one. A
+        jj workspace has only `.jj`; everything else has `.git`, and keeps it,
+        so a checkout made before this existed still reads its markers.
+        """
+        dot_git = self.workdir / ".git"
+        if not dot_git.exists() and (self.workdir / ".jj").is_dir():
+            return self.workdir / ".jj"
+        return Path(self.repo.path)
+
+    @property
     def kind(self) -> Kind:
         from . import kind as kind_module
 
-        return kind_module.read(self.repo)
+        return kind_module.read(self.markers, self.workdir)
 
     def workdir_of(self, name: str) -> Path:
         """Where a source's working copy goes.

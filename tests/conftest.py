@@ -281,7 +281,7 @@ class Checkout:
     def backend(self):
         from umbrella import backend, mode
 
-        return backend.for_mode(mode.read(self.umbrella().repo))
+        return backend.for_mode(mode.read(self.umbrella().markers))
 
     def git(self, *args: str, cwd: Path | None = None) -> str:
         return run("git", *args, cwd=cwd or self.path)
@@ -293,7 +293,7 @@ class Checkout:
     def mode(self) -> str:
         from umbrella import mode as mode_module
 
-        return str(mode_module.read(self.umbrella().repo))
+        return str(mode_module.read(self.umbrella().markers))
 
     def commit(self, source: str, message: str) -> str:
         """Finish a commit the way this checkout's mode does."""

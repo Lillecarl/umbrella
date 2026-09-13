@@ -164,3 +164,70 @@ def test_sync_in_a_worktreespace_refuses(checkout: Checkout) -> None:
     assert checkout.cli("wts", "add", "poc") == 0
 
     assert Checkout(_wts_path(checkout, "poc")).cli("sync") == 1
+
+
+@pytest.fixture
+def jj_umbrella(jj_checkout: Checkout) -> Checkout:
+    """A jj checkout whose umbrella is colocated too, not only its sources.
+
+    `umbrella init --jj` leaves that choice to a person, so this is the second
+    step a person takes. It is what pyterm does, and what nothing else in the
+    suite covered.
+    """
+    run("jj", "git", "init", "--colocate", cwd=jj_checkout.path)
+    return jj_checkout
+
+
+@needs_jj
+def test_a_jj_umbrella_keeps_its_markers_in_dot_jj(jj_umbrella: Checkout) -> None:
+    """A workspace has no .git, so the markers go where it does have one."""
+    from umbrella import kind, mode, wts
+
+    assert jj_umbrella.cli("wts", "add", "poc") == 0
+    tree = _wts_path(jj_umbrella, "poc")
+
+    assert (tree / ".jj").is_dir()
+    assert not (tree / ".git").exists()
+    for marker in (wts.MARKER, mode.MARKER, kind.MARKER):
+        assert (tree / ".jj" / marker).is_file(), marker
+
+
+@needs_jj
+def test_umbrella_in_a_jj_workspace_answers_for_the_workspace(
+    jj_umbrella: Checkout,
+) -> None:
+    """Git discovery walks past a workspace. The .jj stops it."""
+    from umbrella.model import Umbrella
+
+    from umbrella import wts
+
+    assert jj_umbrella.cli("wts", "add", "poc") == 0
+    tree = _wts_path(jj_umbrella, "poc")
+
+    found = Umbrella.open(tree)
+    assert found.workdir == tree
+    assert wts.read(found.markers) == "poc"
+    # And the original is still itself, markers in .git.
+    assert wts.read(jj_umbrella.umbrella().markers) is None
+
+
+@needs_jj
+def test_a_jj_umbrella_worktreespace_does_not_publish(jj_umbrella: Checkout) -> None:
+    assert jj_umbrella.cli("wts", "add", "poc") == 0
+    tree = _wts_path(jj_umbrella, "poc")
+
+    made = Checkout(path=tree)
+    assert made.cli("land") != 0
+
+
+@needs_jj
+def test_removing_a_jj_umbrella_worktreespace_forgets_the_workspace(
+    jj_umbrella: Checkout,
+) -> None:
+    assert jj_umbrella.cli("wts", "add", "poc") == 0
+    tree = _wts_path(jj_umbrella, "poc")
+    assert tree.is_dir()
+
+    assert jj_umbrella.cli("wts", "rm", "poc") == 0
+    assert not tree.exists()
+    assert "poc" not in run("jj", "--no-pager", "workspace", "list", cwd=jj_umbrella.path)
