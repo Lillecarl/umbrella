@@ -705,7 +705,31 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
     # There is no --dry-run here on purpose. The push is what makes a revision
     # public and nothing can take it back, so a flag that ran it and then said
     # it had changed nothing would be lying about the only step that matters.
-    sources, changes = _relock(umbrella, pointers=landed, names=sorted(landed))
+    try:
+        sources, changes = _relock(umbrella, pointers=landed, names=sorted(landed))
+    except nixcli.NixError as error:
+        # **The push is done and the lock is not.** Every revision above
+        # is public and nothing takes it back, so the only way out is
+        # forwards: run `land` again once the remote answers.
+        #
+        # Say it here, because this is the only place that knows both
+        # halves. Without it the last line a reader sees is "pushed",
+        # under a page of whatever nix was shouting, and the next step
+        # in `CLAUDE.md` is an umbrella commit that then has nothing to
+        # commit. Lillecarl/pymux#361.
+        pushed = ", ".join(
+            f"{name} {revision[:SHORT_ID]}" for name, revision in sorted(landed.items())
+        )
+        _die(
+            f"{error}\n\n"
+            f"  pushed and public: {pushed}\n"
+            f"  {lock.PATH} is NOT written, so nothing here is finished.\n"
+            "  Run `umbrella land` again. It pushes nothing twice, and a\n"
+            "  502 or 504 from the forge is worth waiting a minute for.\n"
+            "  Do not commit the umbrella until it says it wrote the lock."
+        )
+        raise
+
     return _report(umbrella, sources, changes, dry_run=False)
 
 

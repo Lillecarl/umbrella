@@ -8,7 +8,8 @@ import pytest
 
 from conftest import Checkout, Lab, needs_jj, node, run, write_lock
 
-from umbrella import lock
+from umbrella import lock, nixcli
+from umbrella.model import SHORT_ID
 
 
 def _git(checkout: Checkout, *args: str) -> subprocess.CompletedProcess[str]:
@@ -63,6 +64,40 @@ def test_land_does_nothing_when_there_is_nothing_to_land(
 ) -> None:
     assert checkout.cli("land") == 0
     assert "nothing to land" in capsys.readouterr().out
+
+
+def test_land_says_the_lock_is_unwritten_when_the_prefetch_fails(
+    checkout: Checkout,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """
+    The push cannot be taken back, and writing the lock can fail after
+    it: the forge answered 504 to the fetch the hash needs.
+
+    So the message has to say which half it stopped in. Without it the
+    last line a reader sees is "pushed", and the next step -- an
+    umbrella commit -- has nothing to commit and makes an empty one.
+    Lillecarl/pymux#361.
+    """
+    checkout.edit("sub1", "v2")
+    landed = checkout.commit("sub1", "v2")
+
+    def refuse(*_args, **_kwargs):
+        raise nixcli.NixError("nix flake prefetch: HTTP error 504")
+
+    monkeypatch.setattr(nixcli, "prefetch", refuse)
+
+    assert checkout.cli("land") == 1
+
+    said = capsys.readouterr().err
+    assert "pushed and public" in said
+    assert landed[:SHORT_ID] in said
+    assert lock.PATH in said
+    assert "land` again" in said
+
+    # And it really did stop there: the source is out and the lock is not.
+    assert checkout.locked("sub1") != landed
 
 
 def test_land_refuses_to_move_anything_with_no_advance(checkout: Checkout) -> None:
