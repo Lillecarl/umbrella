@@ -41,6 +41,14 @@ class Backend(Protocol):
     def advance(self, source: Source, name: str, exists: bool, oid: Oid) -> None:
         """Fast forward that branch onto the commit being landed."""
 
+    def amend(self, source: Source, oid: Oid, path: str) -> None:
+        """Fold that one file into that commit.
+
+        `land` writes the umbrella pin and calls this, so the commit it
+        publishes carries the pin. The caller has already refused a dirty
+        source, so the file is the only thing that changed.
+        """
+
     def push(self, source: Source, branch: str) -> None: ...
 
     def fetch(self, source: Source) -> None: ...
@@ -111,6 +119,24 @@ class GitBackend:
             gitcli.run(source.workdir, "branch", "--force", name, str(oid))
         else:
             gitcli.run(source.workdir, "branch", name, str(oid))
+
+    def amend(self, source: Source, oid: Oid, path: str) -> None:
+        if source.colocated:
+            # **The mode is this checkout's choice; colocation is the source's
+            # fact.** Every other git operation here is one jj imports without
+            # complaint: a branch moves, a ref is pushed. An amend is not. git
+            # would write a new commit and move HEAD behind jj's back, and jj
+            # then imports it as a second head with @ still on the old one. So
+            # the one rewrite goes through jj, which moves @ with it.
+            jj.squash_into(source.workdir, str(oid))
+            return
+        # Only that path. `dirty` passes over untracked files, so a stray one
+        # can be sitting here, and `git add .` would publish it.
+        #
+        # --no-verify because this is the tool's own one line write, not the
+        # person's commit. The hooks already ran on the commit being amended.
+        gitcli.run(source.workdir, "add", "--", path)
+        gitcli.run(source.workdir, "commit", "--amend", "--no-edit", "--no-verify")
 
     def push(self, source: Source, branch: str) -> None:
         gitcli.run(source.workdir, "push", _remote(source, branch), branch)
@@ -210,6 +236,12 @@ class JjBackend:
             jj.move_bookmark(source.workdir, name, str(oid))
         else:
             jj.create_bookmark(source.workdir, name, str(oid))
+
+    def amend(self, source: Source, oid: Oid, path: str) -> None:
+        # The path is not passed on. A jj working copy holds every change in
+        # the tree, tracked or not, so `dirty` refusing an unempty @ already
+        # means the pin is the only thing in it.
+        jj.squash_into(source.workdir, str(oid))
 
     def push(self, source: Source, branch: str) -> None:
         jj.push_bookmark(source.workdir, branch)

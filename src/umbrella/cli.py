@@ -9,6 +9,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from pygit2 import Oid
+
 from . import backend as backends
 from . import (
     adopt,
@@ -22,6 +24,7 @@ from . import (
     lock,
     mode,
     nixcli,
+    pin,
     refs,
     update,
     wts,
@@ -29,7 +32,7 @@ from . import (
 from .backend import Backend
 from .kind import Kind
 from .mode import Mode
-from .model import SHORT_ID, Relation, Source, Umbrella, UmbrellaError
+from .model import SHORT_ID, Relation, Source, Umbrella, UmbrellaError, on_remote
 
 
 #: How wide the column that leads a line is, in characters.
@@ -641,6 +644,64 @@ def _declared_branches(umbrella: Umbrella) -> dict[str, str]:
     }
 
 
+def _pin_revision(umbrella: Umbrella) -> str | None:
+    """The umbrella revision `land` records in the sources it publishes.
+
+    This checkout's own HEAD, which is the umbrella every working copy beside
+    it was built against. The lock `land` is about to write comes after it, and
+    it has to: that lock names the commits being published, so a commit naming
+    the lock would need a hash containing itself. See `pin`.
+
+    None when nobody else can fetch it. A pin naming a revision that is only on
+    this disk makes the source unbuildable for everybody until the umbrella is
+    pushed, and the pin already in the file is public and still correct, just
+    older.
+    """
+    if umbrella.repo.head_is_unborn:
+        return None
+    rev = umbrella.repo.head.target
+    if not on_remote(umbrella.repo, rev):
+        print(
+            f"{'umbrella':<{NAME_COLUMN}} {str(rev)[:SHORT_ID]} is on no remote, "
+            f"so no {pin.PATH} moves. Push the umbrella first.",
+            file=sys.stderr,
+        )
+        return None
+    return str(rev)
+
+
+def _write_pin(
+    backend: Backend, source: Source, head: Oid, revision: str | None
+) -> Oid:
+    """Record the umbrella in the commit about to be published.
+
+    Returns the commit to land. That is a new one when the pin moved, because
+    the pin goes *into* the work rather than beside it. A project nobody
+    changed never reaches here, so it gains no commit at all, and a project
+    that did gains no second one.
+    """
+    if revision is None or not pin.carried_by(source.workdir):
+        return head
+    if pin.read(source.workdir) == revision:
+        return head
+    if source.on_remote(head):
+        # Amending a published commit is how history gets rewritten under
+        # somebody else. The lock still records it; only the pin waits.
+        print(
+            f"{source.name:<{NAME_COLUMN}} {str(head)[:SHORT_ID]} is already on a "
+            f"remote, so {pin.PATH} stays where it is"
+        )
+        return head
+
+    pin.write(source.workdir, revision)
+    backend.amend(source, head, pin.PATH)
+    moved = source.head()
+    if moved is None or moved == head:
+        _die(f"{source.name}: wrote {pin.PATH} and the commit did not change")
+    print(f"{source.name:<{NAME_COLUMN}} pinned the umbrella at {revision[:SHORT_ID]}")
+    return moved
+
+
 def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
     """Push each working copy, then lock the sources at what was pushed."""
     _needs_umbrella(umbrella, "land")
@@ -652,6 +713,8 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
         )
 
     declared = _declared_branches(umbrella)
+    # --no-advance means this run rewrites nothing, and the pin is a rewrite.
+    pin_revision = None if args.no_advance else _pin_revision(umbrella)
     landed: dict[str, str] = {}
     for source in umbrella.sources():
         if not source.present:
@@ -670,6 +733,10 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
             _die(f"{source.name}: has unresolved conflicts. Resolve them first.")
         if backend.dirty(source):
             _die(f"{source.name}: has uncommitted work. Commit it first.")
+
+        # After the two guards above, because it rewrites the commit, and
+        # before the branch is chosen, because that rewrite moves it.
+        head = _write_pin(backend, source, head, pin_revision)
 
         try:
             choice = refs.choose(

@@ -100,6 +100,10 @@ def _sandbox_identity(tmp_path_factory: pytest.TempPathFactory) -> None:
         JJ_CONFIG=str(jjconfig),
         UMBRELLA_EXE=str(shim),
         GIT_TERMINAL_PROMPT="0",
+        # Nothing here is interactive. A command that wants an editor must
+        # fail rather than wait, because a waiting test hangs the whole run.
+        GIT_EDITOR="false",
+        JJ_EDITOR="false",
     )
 
 

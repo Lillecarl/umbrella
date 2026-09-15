@@ -208,6 +208,18 @@ def push_bookmark(repo: Path, bookmark: str) -> None:
     run(repo, "git", "push", "--bookmark", bookmark)
 
 
+def squash_into(repo: Path, revision: str) -> None:
+    """Move what the working copy holds into an earlier commit.
+
+    --keep-emptied leaves @ where it is, with its own description. Without it
+    jj abandons @, and when both @ and the destination carry a description jj
+    opens an editor to combine the two. That hangs a run nobody is watching.
+    A described but empty @ is ordinary: `jj describe` with no `jj new` after
+    it leaves exactly that.
+    """
+    run(repo, "squash", "--keep-emptied", "--into", revision)
+
+
 def move_bookmark(repo: Path, bookmark: str, to: str) -> None:
     run(repo, "bookmark", "move", bookmark, "--to", to)
 

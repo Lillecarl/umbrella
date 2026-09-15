@@ -22,7 +22,30 @@ from pygit2.enums import RepositoryOpenFlag
 #: id uses this one, so two lines line up.
 SHORT_ID = 8
 
-__all__ = ["SHORT_ID", "Relation", "Source", "Umbrella", "UmbrellaError"]
+__all__ = ["SHORT_ID", "Relation", "Source", "Umbrella", "UmbrellaError", "on_remote"]
+
+
+def on_remote(repo: Repository, oid: Oid) -> bool:
+    """Is this commit reachable from any remote-tracking branch of this repo?
+
+    The question a source asks about a commit it is about to publish, and the
+    question the umbrella asks about the revision it is about to be pinned at.
+    Both mean the same thing: can somebody else fetch this.
+
+    descendant_of is strict, so the equal case needs its own arm.
+    """
+    if oid not in repo:
+        return False
+    for name in repo.branches.remote:
+        try:
+            target = repo.branches.remote[name].target
+        except (KeyError, TypeError):
+            continue  # a symbolic ref such as origin/HEAD
+        if not isinstance(target, Oid):
+            continue
+        if target == oid or repo.descendant_of(target, oid):
+            return True
+    return False
 
 
 class Relation(enum.StrEnum):
@@ -99,23 +122,7 @@ class Source:
         return Relation.DIVERGED
 
     def on_remote(self, oid: Oid) -> bool:
-        """Is this commit reachable from any remote-tracking branch?
-
-        descendant_of is strict, so the equal case needs its own arm.
-        """
-        repo = self.repo()
-        if oid not in repo:
-            return False
-        for name in repo.branches.remote:
-            try:
-                target = repo.branches.remote[name].target
-            except (KeyError, TypeError):
-                continue  # a symbolic ref such as origin/HEAD
-            if not isinstance(target, Oid):
-                continue
-            if target == oid or repo.descendant_of(target, oid):
-                return True
-        return False
+        return on_remote(self.repo(), oid)
 
 
 class Umbrella:
