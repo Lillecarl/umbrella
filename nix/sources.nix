@@ -39,10 +39,45 @@ let
   # took the fetch below instead of the umbrella it shipped inside.
   inUmbrella = !escapesStore && builtins.pathExists ../../nix/wire.nix;
 
+  # The umbrella itself, when this checkout is on its own.
+  #
+  # **An unlocked `github:nixidae/nixidae` resolves the head of the default
+  # branch, at evaluation time, every time `tarball-ttl` does not answer from
+  # cache.** So the same commit of this repository gives a different answer an
+  # hour later, with nothing here changed and no lock moved. A consumer that
+  # pins the umbrella still sees its render hash move on its own, and nothing
+  # says why. Measured 2026-09-16 by a consumer whose nixidae pin had not
+  # moved since 2026-09-14 and whose render hash moved anyway, twice.
+  #
+  # The other five projects read `nix/umbrella.rev` for this, and this one had
+  # no such arm at all. Same rule here, in the same order.
+  umbrellaRev = builtins.getEnv "UMBRELLA_REV";
+
+  # A file, and not a git ref, because a tree that Nix fetched carries no
+  # `.git`: an expression inside it cannot learn its own revision. It is also
+  # the only arm that works under `--pure-eval`, where `builtins.getEnv`
+  # answers "". `nix/umbrella.rev` of the other projects holds the reasoning.
+  pinMatch =
+    if builtins.pathExists ./umbrella.rev then
+      builtins.match "[ \n\t]*([0-9a-f]{40})[ \n\t]*" (builtins.readFile ./umbrella.rev)
+    else
+      null;
+  pinned = if pinMatch == null then "" else builtins.head pinMatch;
+
+  umbrellaRef =
+    if umbrellaRev != "" then
+      "git+https://github.com/nixidae/nixidae?rev=${umbrellaRev}&shallow=1"
+    else if pinned != "" then
+      "git+https://github.com/nixidae/nixidae?rev=${pinned}&shallow=1"
+    else if builtins.getEnv "UMBRELLA_GIT" != "" then
+      "git+https://github.com/nixidae/nixidae?shallow=1"
+    else
+      "github:nixidae/nixidae";
+
   wire =
     if inUmbrella then
       ../../nix/wire.nix
     else
-      (builtins.fetchTree (builtins.parseFlakeRef "github:nixidae/nixidae")).outPath + "/nix/wire.nix";
+      (builtins.fetchTree (builtins.parseFlakeRef umbrellaRef)).outPath + "/nix/wire.nix";
 in
 import wire { overrides.umbrella = ../.; }
