@@ -1,6 +1,8 @@
 # How a child finds the umbrella
 
-Status: the constraint is decided. The mechanism is not.
+Status: decided and shipped, as umbrella 0.1.0. See
+[`releases.md`](releases.md) for what to change in a repository that
+still runs 0.0.0.
 
 **Carl's constraint, 2026-09-16: the umbrella must be pure. A standalone
 child may be impure.** That rules out nothing below by itself, but it means
@@ -21,7 +23,7 @@ below comes from a run you can repeat. The scripts are in the appendix.
 - [The traversal, measured end to end](#the-traversal-measured-end-to-end)
 - [Which children a change must rebuild](#which-children-a-change-must-rebuild)
 - [The contributor lifecycle](#the-contributor-lifecycle)
-- [Recommendation](#recommendation)
+- [Decision, and what shipped](#decision-and-what-shipped)
 - [Appendix: repeating the runs](#appendix-repeating-the-runs)
 
 ## The constraint
@@ -434,46 +436,48 @@ Pin `nixidae`. Nothing else. Pure today, measured.
 | maintainer | it is their checkout | yes |
 | consumer | no | only the input name |
 
-## Recommendation
+## Decision, and what shipped
 
-**C with D**, and treat the trigger as an optimisation rather than the
-mechanism.
-
-The traversal above settles the shape: a mapping ref reaches the umbrella
-from a standalone checkout in one fetch, with no pin, no rewrite and no
-fixpoint. E — a note — does the same thing for tooling that already has a
-clone, and is the better answer for a PR, where the merge-base has a note and
-the head has nothing.
+**C with D.** The trigger is an optimisation, not the mechanism.
 
 The constraint settles C: a standalone child may be impure, so the only
-thing C gives up costs nothing. And C is most of the way done already — the
-umbrella path is pure today, measured, and the only exposed surface is the
-standalone one.
+thing C gives up costs nothing. And C was most of the way done already --
+the umbrella path is pure today, measured, and the only exposed surface is
+the standalone one.
 
-E fills that surface with the one mechanism that has no fixpoint and no
-rewrite. The umbrella's write side becomes "push a note" instead of "amend
-the child", which removes the churn that A pays and that B would pay in a
-different currency. `umbrella land` gains one push; no child gains a
-commit.
+D fills that surface. A mapping ref reaches the umbrella from a standalone
+checkout with no pin, no rewrite and no fixpoint, and one ref per revision
+written once is immutable, so a stale fetcher cache still answers correctly.
 
-E also answers the PR case without a round-trip, which was the open part of
-C. A contributor's branch reads the note on its merge-base. That is one git
-command and it leaves the contributor's commit alone.
+**Not E.** A note says the same thing, and for a while it looked better for
+a PR, where the merge-base has a note and the head has nothing. Two
+measurements moved it:
 
-The trigger then buys latency, not correctness: a note on the landed commit
-*is* the revision the trigger would carry, so a dispatch only makes it arrive
-sooner. Worth adding later, not first.
+- A plain `git clone` carries no `refs/notes/*`. The refs seen in the first
+  probe came from a fetch run by hand. So a note is not cheaper to reach
+  than a ref; both need one network call.
+- `builtins.tryEval` does not catch a failed `fetchGit`. So neither a note
+  nor a ref can be an arm inside Nix that falls back when it is absent.
+  Whatever reads it has to be outside Nix.
 
-Keep `nix/umbrella.rev` while this is undecided. It is in six projects, it is
-read purely, and stale-but-deterministic beats the branch head. Under C it
-stops being load-bearing.
+Once the read is outside Nix, the walk over ancestors answers the PR case
+for a ref exactly as a note would, and a ref needs no `notes.rewriteRef`
+handling. `refs/umbrella/<source>/<revision>` it is.
 
-**What would flip this.** If a fork PR's CI cannot fetch notes from upstream,
-E loses its best property and C needs the round-trip after all. That is not
-measured here, and it is checkable with one workflow run.
+**What shipped.** `umbrella mark` writes the refs and pushes them.
+`bin/walkback.sh` reads them: one `git ls-remote`, then `git rev-list HEAD`
+until a revision hits. CI runs it once per workflow run at `fetch-depth:
+100` and gives every job the answer through `UMBRELLA_REV`.
 
-**What would flip it to B.** Somebody needing `github:Lillecarl/nixkube` as a
-pure flake input. B is the only row that gives it. Nothing needs it today.
+**`nix/umbrella.rev` stays, and is no longer the last word.** It is in six
+projects and it is read purely, which is what a flake consumer and a
+`--pure-eval` build need. The arm after it is now a `throw`: the arm that
+fetched the head of the umbrella's default branch is gone, because it was
+unlocked and moved on its own.
+
+**What would flip this to B.** Somebody needing `github:Lillecarl/nixkube`
+as a pure flake input. B is the only row that gives it. Nothing needs it
+today.
 
 ## Appendix: repeating the runs
 
