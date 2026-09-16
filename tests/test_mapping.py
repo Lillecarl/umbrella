@@ -171,7 +171,7 @@ def test_check_push_names_mark_when_it_lets_the_umbrella_through(
     head = _umbrella_head(checkout)
     _publish(checkout)
 
-    assert checkout.cli_stdin(push_line(head), "check-push") == 0
+    assert checkout.cli_stdin(push_line(head), "check-push", "origin") == 0
 
     assert "umbrella mark" in capsys.readouterr().err
 
