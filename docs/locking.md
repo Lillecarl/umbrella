@@ -18,6 +18,7 @@ below comes from a run you can repeat. The scripts are in the appendix.
 - [What a child can and cannot learn](#what-a-child-can-and-cannot-learn)
 - [The seven approaches](#the-seven-approaches)
 - [The matrix](#the-matrix)
+- [The traversal, measured end to end](#the-traversal-measured-end-to-end)
 - [Which children a change must rebuild](#which-children-a-change-must-rebuild)
 - [Recommendation](#recommendation)
 - [Appendix: repeating the runs](#appendix-repeating-the-runs)
@@ -278,10 +279,75 @@ each source in `builtins.trace` and records which ones a full evaluation
 touches. That is worth doing before the list drives real triggering, and it
 is one evaluation per project.
 
+## The traversal, measured end to end
+
+Carl's question, 2026-09-16: can Nix read the checkout's own commit hash, so
+a standalone child can go `child sha -> mapping ref -> umbrella`?
+
+**Yes. All of it works.** The child does not need to be a flake.
+
+`builtins.readFile ./.git/HEAD` reaches the sha in every checkout shape
+tried:
+
+| checkout shape | result |
+| --- | --- |
+| loose ref (`ref: refs/heads/main`) | read `.git/refs/heads/main` |
+| detached HEAD (what `actions/checkout` leaves) | `.git/HEAD` **is** the sha |
+| after `git gc`, loose ref gone | parsed out of `.git/packed-refs` |
+
+All three answered `b9ea896a...`, which `git rev-parse HEAD` agrees with.
+
+Then one fetch does the rest. From a standalone checkout with no pin file:
+
+```
+childRev    b9ea896a606c919648d5bc94b55811f6dd2dee88   (read from .git)
+umbrellaRev 592d56e7a31004412b500937784804b45c8eeae7   (refs/umbrella/<childRev>)
+lockFile    {"sources":{"a":{"rev":"0c470bf5..."}}}    (read out of the fetched tree)
+```
+
+**A mapping ref beats a note here.** A note needs two steps: fetch the notes
+tree, find the entry, then fetch the umbrella by the revision it holds. The
+ref *is* the umbrella tree, so `refs/umbrella/<child sha>` is one fetch and
+no parsing. Notes stay the better answer for tooling that already has a
+clone; the ref is the better answer for Nix.
+
+**The ref is immutable, which the branch head never was.** One ref per child
+commit, written once. So a stale fetcher cache still gives the *right*
+answer, where a stale cache of `github:nixidae/nixidae` gives last hour's
+head. `--tarball-ttl` stops mattering.
+
+It is impure, as measured earlier: `fetchGit` by ref is refused under
+`--pure-eval`. Under the constraint above that costs nothing, because only a
+standalone child takes this path.
+
+### What it does not cover
+
+A commit the umbrella has never locked has no ref. Measured: the fetch fails
+with *"Failed to fetch git repository"*. That is every commit you have just
+made and not landed, and every PR head.
+
+Nix cannot walk to the parent to find one — reading a commit object means
+inflating zlib, and no primop does that. So this arm needs a fallback, and
+the order is:
+
+1. `UMBRELLA_REV`, which CI sets.
+2. `refs/umbrella/<sha>` — exact, for a landed commit.
+3. `nix/umbrella.rev` — the pin file, for a commit not landed yet.
+
+The pin file earns its place as arm 3 and only there. It is consulted while
+you are working, which is when being one landing behind is harmless, because
+you are about to land. **The branch-head arm can go.**
+
 ## Recommendation
 
-**C with E**, and treat the trigger as an optimisation rather than the
+**C with D**, and treat the trigger as an optimisation rather than the
 mechanism.
+
+The traversal above settles the shape: a mapping ref reaches the umbrella
+from a standalone checkout in one fetch, with no pin, no rewrite and no
+fixpoint. E — a note — does the same thing for tooling that already has a
+clone, and is the better answer for a PR, where the merge-base has a note and
+the head has nothing.
 
 The constraint settles C: a standalone child may be impure, so the only
 thing C gives up costs nothing. And C is most of the way done already — the
