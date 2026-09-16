@@ -11,7 +11,6 @@ from pathlib import Path
 
 from pygit2 import Oid
 
-from . import backend as backends
 from . import (
     adopt,
     gitcli,
@@ -22,6 +21,7 @@ from . import (
     jj,
     kind,
     lock,
+    mapping,
     mode,
     nixcli,
     pin,
@@ -29,11 +29,11 @@ from . import (
     update,
     wts,
 )
+from . import backend as backends
 from .backend import Backend
 from .kind import Kind
 from .mode import Mode
 from .model import SHORT_ID, Relation, Source, Umbrella, UmbrellaError, on_remote
-
 
 #: How wide the column that leads a line is, in characters.
 #:
@@ -816,6 +816,63 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
 # -- hooks ----------------------------------------------------------------
 
 
+def cmd_mark(umbrella: Umbrella, _backend: Backend, args) -> int:
+    """Publish the refs that let a standalone checkout find this umbrella."""
+    _needs_umbrella(umbrella, "mark")
+    if umbrella.repo.head_is_unborn:
+        _die("this umbrella has no commit yet, so it locks nothing.")
+    head = umbrella.repo.head.target
+
+    # The ref must point at something a stranger can fetch. An unpushed
+    # umbrella would publish a name for a commit only this machine holds.
+    if not on_remote(umbrella.repo, head):
+        _die(
+            f"{str(head)[:SHORT_ID]} is on no remote. Push the umbrella first, "
+            "then mark: the refs name it."
+        )
+
+    # The committed lock and not the working tree, because the ref says "this
+    # umbrella commit locks that revision" and only the commit can say so.
+    locked = lock.revisions(umbrella.committed_lock())
+
+    locked, narrowed = mapping.ours(nixcli.spec_if_readable(umbrella.workdir), locked)
+    if not narrowed:
+        print(
+            f"{nixcli.SPEC} declares a working copy for no source, so every locked "
+            "revision gets a ref",
+            file=sys.stderr,
+        )
+    if not locked:
+        _die(f"{lock.PATH} at {str(head)[:SHORT_ID]} names no revision.")
+
+    fresh, held = mapping.plan(umbrella.repo, locked)
+    for source in sorted(held):
+        print(
+            f"{source:<{NAME_COLUMN}} {str(locked[source])[:SHORT_ID]} already maps to "
+            f"{str(held[source])[:SHORT_ID]}"
+        )
+    if not fresh:
+        print("every locked revision already has a ref")
+        return 0
+
+    for mark in fresh:
+        umbrella.repo.references.create(mark.ref, head)
+        print(
+            f"{mark.source:<{NAME_COLUMN}} {str(mark.revision)[:SHORT_ID]} -> "
+            f"{str(head)[:SHORT_ID]}"
+        )
+    if args.no_push:
+        print(f"wrote {len(fresh)} ref(s) locally; --no-push, so nothing was published")
+        return 0
+
+    # One push, so a network failure leaves none of them half published.
+    gitcli.run(
+        umbrella.workdir, "push", args.remote, *(f"{m.ref}:{m.ref}" for m in fresh)
+    )
+    print(f"pushed {len(fresh)} ref(s) to {args.remote}")
+    return 0
+
+
 def cmd_check_commit(umbrella: Umbrella, backend: Backend, _args) -> int:
     problems = guards.check_commit(umbrella)
     for problem in problems:
@@ -931,6 +988,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    marker = sub.add_parser(
+        "mark",
+        help="publish the refs that map each locked revision to this umbrella",
+    )
+    marker.add_argument(
+        "--remote", default="origin", help="where to push them (default: origin)"
+    )
+    marker.add_argument(
+        "--no-push", action="store_true", help="write the refs but do not publish them"
+    )
+
     cc = sub.add_parser(
         "initcc", help="write project settings so Claude uses umbrella for worktrees"
     )
@@ -1009,6 +1077,7 @@ COMMANDS = {
     "sync": cmd_sync,
     "update": cmd_update,
     "land": cmd_land,
+    "mark": cmd_mark,
     "initcc": cmd_initcc,
     "kind": cmd_kind,
     "wts.add": cmd_wts_add,
