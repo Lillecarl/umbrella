@@ -133,3 +133,26 @@ def test_ours_keeps_everything_when_the_specification_says_nothing() -> None:
 
     assert kept == locked
     assert narrowed is False
+
+
+def test_mark_publishes_refs_an_earlier_run_left_local(checkout: Checkout) -> None:
+    """A `--no-push` run leaves refs behind; the next push must pick them up.
+
+    Otherwise they stay local forever: every later run finds them written and
+    skips them again.
+    """
+    _publish(checkout)
+    assert checkout.cli("mark", "--no-push") == 0
+    local = set(_refs(checkout))
+    assert local, "the first run wrote nothing"
+    assert not run(
+        "git", "ls-remote", "origin", f"{mapping.PREFIX}/*", cwd=checkout.path
+    ).strip(), "--no-push published something"
+
+    assert checkout.cli("mark") == 0
+
+    remote = run(
+        "git", "ls-remote", "origin", f"{mapping.PREFIX}/*", cwd=checkout.path
+    )
+    names = {line.split("\t", 1)[1] for line in remote.splitlines() if line.strip()}
+    assert names == local

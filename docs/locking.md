@@ -409,8 +409,17 @@ neither run can see the other. Two answers:
 
 ### 3. Landing
 
-`umbrella land` pushes the working copies, locks what was pushed, and — under
-this scheme — writes one mapping ref per child. No child gains a commit.
+`umbrella land` pushes the working copies and locks what was pushed. Then,
+once that lock is committed and pushed, `umbrella mark` publishes one ref per
+locked revision. No child gains a commit.
+
+`mark` is a separate command rather than part of `land` because the ref names
+the umbrella commit that holds the lock, and at `land` time that commit does
+not exist yet.
+
+Measured against the real repositories on 2026-09-16: `refs/umbrella/nixkube/82a02511...`
+resolved to umbrella `a22c9026`, whose `nix/sources.lock` names nixkube at
+`82a02511...` — the same revision the ref was keyed by.
 
 ### 4. Consuming
 

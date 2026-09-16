@@ -851,9 +851,10 @@ def cmd_mark(umbrella: Umbrella, _backend: Backend, args) -> int:
             f"{source:<{NAME_COLUMN}} {str(locked[source])[:SHORT_ID]} already maps to "
             f"{str(held[source])[:SHORT_ID]}"
         )
+    # No early return when nothing is fresh. The refs may be written here and
+    # still missing from the remote, and the push below is what fixes that.
     if not fresh:
         print("every locked revision already has a ref")
-        return 0
 
     for mark in fresh:
         umbrella.repo.references.create(mark.ref, head)
@@ -865,11 +866,20 @@ def cmd_mark(umbrella: Umbrella, _backend: Backend, args) -> int:
         print(f"wrote {len(fresh)} ref(s) locally; --no-push, so nothing was published")
         return 0
 
-    # One push, so a network failure leaves none of them half published.
-    gitcli.run(
-        umbrella.workdir, "push", args.remote, *(f"{m.ref}:{m.ref}" for m in fresh)
+    # **Every ref for a locked revision, and not only the new ones.** A ref
+    # this run finds already written is not necessarily on the remote: a
+    # `--no-push` run leaves exactly that, and so does a push that failed
+    # halfway. Skipping those would leave them local forever, because the
+    # next run finds them again and skips them again. git makes a ref it
+    # already has a no-op, so sending all of them costs nothing and converges.
+    #
+    # No `+`, so a remote ref that disagrees is refused rather than
+    # overwritten. The first umbrella to publish one keeps it.
+    every = sorted(
+        {mapping.name(name, revision) for name, revision in locked.items()}
     )
-    print(f"pushed {len(fresh)} ref(s) to {args.remote}")
+    gitcli.run(umbrella.workdir, "push", args.remote, *(f"{r}:{r}" for r in every))
+    print(f"pushed {len(every)} ref(s) to {args.remote}")
     return 0
 
 
