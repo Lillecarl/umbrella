@@ -74,7 +74,7 @@ def test_land_creates_no_pin_where_a_source_carries_none(checkout: Checkout) -> 
 
 
 def test_land_rewrites_nothing_when_the_pin_already_matches(
-    checkout: Checkout,
+    checkout: Checkout, capsys: pytest.CaptureFixture[str]
 ) -> None:
     landed = _adopt(checkout, "sub1", _umbrella_head(checkout))
 
@@ -82,6 +82,9 @@ def test_land_rewrites_nothing_when_the_pin_already_matches(
 
     assert checkout.head_of("sub1") == landed
     assert checkout.locked("sub1") == landed
+    # It says so. A skip that prints nothing cannot be told apart from the
+    # pin never running at all.
+    assert "already names" in capsys.readouterr().out
 
 
 def test_land_leaves_a_published_commit_alone(

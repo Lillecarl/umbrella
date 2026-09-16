@@ -682,7 +682,16 @@ def _write_pin(
     """
     if revision is None or not pin.carried_by(source.workdir):
         return head
-    if pin.read(source.workdir) == revision:
+
+    # Every branch below says which one it took. A source being landed that
+    # carries a pin is rare enough for a line each, and a silent skip here is
+    # indistinguishable from the feature not running at all.
+    written = pin.read(source.workdir)
+    if written == revision:
+        print(
+            f"{source.name:<{NAME_COLUMN}} {pin.PATH} already names "
+            f"{revision[:SHORT_ID]}"
+        )
         return head
     if source.on_remote(head):
         # Amending a published commit is how history gets rewritten under
@@ -698,7 +707,11 @@ def _write_pin(
     moved = source.head()
     if moved is None or moved == head:
         _die(f"{source.name}: wrote {pin.PATH} and the commit did not change")
-    print(f"{source.name:<{NAME_COLUMN}} pinned the umbrella at {revision[:SHORT_ID]}")
+    was = "nothing" if written is None else written[:SHORT_ID]
+    print(
+        f"{source.name:<{NAME_COLUMN}} {pin.PATH}: {was} -> {revision[:SHORT_ID]} "
+        f"(into {str(moved)[:SHORT_ID]})"
+    )
     return moved
 
 
