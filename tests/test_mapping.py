@@ -156,3 +156,29 @@ def test_mark_publishes_refs_an_earlier_run_left_local(checkout: Checkout) -> No
     )
     names = {line.split("\t", 1)[1] for line in remote.splitlines() if line.strip()}
     assert names == local
+
+
+def test_check_push_names_mark_when_it_lets_the_umbrella_through(
+    checkout: Checkout, capsys
+) -> None:
+    """The one moment that knows the umbrella is about to become public.
+
+    `mark` cannot run before this push, and the tool is not invoked again
+    after it, so nothing later can say it.
+    """
+    from conftest import push_line
+
+    head = _umbrella_head(checkout)
+    _publish(checkout)
+
+    assert checkout.cli_stdin(push_line(head), "check-push") == 0
+
+    assert "umbrella mark" in capsys.readouterr().err
+
+
+def test_land_names_the_two_steps_mark_needs_first(checkout: Checkout) -> None:
+    """`land` cannot run `mark`: at that point nobody has committed the lock."""
+    from umbrella import cli
+
+    assert "umbrella mark" in cli._AFTER_LAND
+    assert "commit nix/sources.lock" in cli._AFTER_LAND

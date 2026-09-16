@@ -810,7 +810,21 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
         )
         raise
 
-    return _report(umbrella, sources, changes, dry_run=False)
+    code = _report(umbrella, sources, changes, dry_run=False)
+    if code == 0 and changes:
+        print(_AFTER_LAND, file=sys.stderr)
+    return code
+
+
+# **`land` cannot run `mark` itself.** `mark` writes refs that point at the
+# umbrella commit, and at the end of `land` the lock is a file nobody has
+# committed. So it names the steps instead, and the pre-push guard says it
+# again at the one moment that commit is about to become public.
+_AFTER_LAND = """
+  next: commit nix/sources.lock, push the umbrella, then `umbrella mark`.
+        mark publishes refs/umbrella/<source>/<revision>, which is how a
+        standalone checkout and its CI find this umbrella. It needs the
+        umbrella commit on the remote, so it cannot run any earlier."""
 
 
 # -- hooks ----------------------------------------------------------------
@@ -904,7 +918,17 @@ def cmd_check_push(umbrella: Umbrella, backend: Backend, args) -> int:
         )
         names = {p.name for p in problems}
         _hints(backend, [s for s in umbrella.sources() if s.name in names])
-    return 1 if problems else 0
+        return 1
+    if umbrella.kind is Kind.UMBRELLA:
+        # The one moment that knows the umbrella commit is about to become
+        # public. `mark` cannot run before it, and the tool is not invoked
+        # again after it, so there is nowhere later to say this.
+        print(
+            "pre-push: when this push finishes, run `umbrella mark` to publish "
+            "the refs a standalone checkout reads.",
+            file=sys.stderr,
+        )
+    return 0
 
 
 # -- wiring ---------------------------------------------------------------
