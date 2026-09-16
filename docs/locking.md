@@ -20,6 +20,7 @@ below comes from a run you can repeat. The scripts are in the appendix.
 - [The matrix](#the-matrix)
 - [The traversal, measured end to end](#the-traversal-measured-end-to-end)
 - [Which children a change must rebuild](#which-children-a-change-must-rebuild)
+- [The contributor lifecycle](#the-contributor-lifecycle)
 - [Recommendation](#recommendation)
 - [Appendix: repeating the runs](#appendix-repeating-the-runs)
 
@@ -337,6 +338,92 @@ the order is:
 The pin file earns its place as arm 3 and only there. It is consulted while
 you are working, which is when being one landing behind is harmless, because
 you are about to land. **The branch-head arm can go.**
+
+## The contributor lifecycle
+
+Four people touch this and only one of them is the maintainer. The scheme is
+only good if the other three barely notice it.
+
+### Walking back to a locked ancestor
+
+A commit nobody has landed has no mapping ref. CI can find the nearest
+ancestor that does: one `git ls-remote <umbrella> 'refs/umbrella/<child>/*'`
+builds the table, and `git rev-list HEAD` walks until one matches.
+
+Measured, from a HEAD two commits past the last landing:
+
+| `fetch-depth` | commits to walk | result |
+| --- | --- | --- |
+| `1` *(the `actions/checkout` default)* | 1 | **fails** — nothing to walk |
+| `5` | 5 | found after 2 steps |
+| `0` (full) | 9 | found after 2 steps |
+
+So the walk needs a depth above one. A modest number covers any real gap
+between a branch point and the last landing; a full clone is not needed.
+
+**It buys one landing of freshness, and no more.** The pin file already
+answers for an unlanded commit, deterministically and with no network call
+and no history. The walk finds the umbrella that locked the nearest landed
+ancestor; the pin finds the umbrella that *that* ancestor was written
+against, which is one landing older. Worth having in CI, where a depth is one
+line. Not worth making a local build depend on.
+
+### 1. A change to one project
+
+**They never learn the umbrella exists, and that is the bar.**
+
+Fork the child, branch, edit, `nix build --file .`, open a PR. The pin file
+in the tree resolves the umbrella. No `ls-remote`, no walk, no token, no
+nixidae. Their PR runs in the child's own repository and resolves the same
+way.
+
+This is the property worth protecting, and it is the reason not to move CI
+into nixidae.
+
+### 2. A change across two projects
+
+This one needs the umbrella, and it should: a change that spans two
+repositories is a coordinated change, and the umbrella is where coordination
+lives.
+
+Locally it already works:
+
+```
+git clone https://github.com/nixidae/nixidae && cd nixidae
+umbrella fetch easykubenix nixkube      # siblings, at the locked revisions
+UMBRELLA_DEV=easykubenix,nixkube nix build --file .
+```
+
+`UMBRELLA_DEV` reads those working copies as directories, so an edit in one
+reaches a build of the other with no commit and no push. `umbrella status`
+says what is dirty, ahead or unpushed across all of them.
+
+**The gap is CI, not the desk.** Two PRs open in two repositories, and
+neither run can see the other. Two answers:
+
+- Land in dependency order — easykubenix first, then nixkube. Standard
+  multirepo practice, and it costs two round trips.
+- The round-trip workflow: a nixidae branch whose lock names both PR heads,
+  and each child's CI takes `UMBRELLA_REV` from it. This is the case that
+  earns the trigger machinery, and the only one.
+
+### 3. Landing
+
+`umbrella land` pushes the working copies, locks what was pushed, and — under
+this scheme — writes one mapping ref per child. No child gains a commit.
+
+### 4. Consuming
+
+Pin `nixidae`. Nothing else. Pure today, measured.
+
+### What is asked of whom
+
+| | forks nixidae? | must know the umbrella exists? |
+| --- | --- | --- |
+| single-repo contributor | **no** | **no** |
+| cross-repo contributor | yes, as a workspace | yes |
+| maintainer | it is their checkout | yes |
+| consumer | no | only the input name |
 
 ## Recommendation
 
