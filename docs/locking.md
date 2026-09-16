@@ -475,6 +475,25 @@ projects and it is read purely, which is what a flake consumer and a
 fetched the head of the umbrella's default branch is gone, because it was
 unlocked and moved on its own.
 
+**The trigger is not planned.** Carl, 2026-09-16: ref walking already
+gives a solo push an answer that is impure but correct, so nixidae does not
+need to start child CI. Verified from a fresh `--depth 100` clone of pynixd
+with no local state: walkback found the locking umbrella zero steps back,
+and with `UMBRELLA_REV` unset the in-tree pin answered instead.
+
+One case is left, and it is not a solo push. A land that moves two
+repositories that depend on each other pushes the children first -- that is
+what starts their CI -- and `mark` cannot run until the umbrella commit
+those pushes produce is on the remote. So the child job may walk back to the
+umbrella before this one, which locks the *old* sibling. Both outcomes were
+seen on 2026-09-16: nixkube run 35091233357 read `2 step(s) back`, and the
+next round read `0 step(s) back`, because `mark` had won by then.
+
+The answer is always a real umbrella and never a moving one, so this costs a
+re-run on a coordinated land, not correctness. If it becomes a nuisance, the
+narrow fix is for `land` to dispatch only the children it landed beside a
+changed sibling -- not the reverse-closure fan-out measured above.
+
 **What would flip this to B.** Somebody needing `github:Lillecarl/nixkube`
 as a pure flake input. B is the only row that gives it. Nothing needs it
 today.
