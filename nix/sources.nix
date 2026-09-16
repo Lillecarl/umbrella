@@ -84,7 +84,8 @@ let
         nix/sources.nix: no umbrella to build umbrella against.
 
         Set UMBRELLA_REV, or write an umbrella revision into
-        nix/umbrella.rev. This prints the one that locks this checkout:
+        nix/umbrella.rev. This prints the umbrella that locks the
+        nearest landed ancestor of HEAD:
 
           bin/walkback.sh https://github.com/nixidae/nixidae umbrella
 

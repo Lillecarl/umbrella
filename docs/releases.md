@@ -123,6 +123,15 @@ umbrella-rev:
         echo "rev=$rev" >> "$GITHUB_OUTPUT"
 ```
 
+**The run a push starts resolves the umbrella of the branch point, not
+the umbrella that locks the commit.** `mark` cannot run until the umbrella
+commit is on the remote, and that commit cannot exist until the children are
+pushed -- which is what starts the run. So the first run after a land walks
+back one step. That is deterministic and it is the umbrella the work was
+written against, which is enough for a change inside one repository. A
+change that spans two repositories needs the umbrella that locks it: re-run
+the job, or dispatch the run from the umbrella after `mark`.
+
 `fetch-depth: 100` is the default to copy. The walk needs the branch point
 of a branch nobody landed, and these repositories move fast. Depth 1 fails
 the walk; measured in [`locking.md`](locking.md), a two step walk needs 5.
