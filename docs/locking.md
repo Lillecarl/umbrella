@@ -131,9 +131,9 @@ Convergence needs the dependency graph to be acyclic. It is:
 
 ```
 ghanix, pynixd, umbrella, flake-compatish   (leaves)
-user-mode-nixos -> ghanix
-easykubenix     -> nanopynix user-mode-nixos
-nixkube         -> easykubenix ghanix user-mode-nixos
+vivarium        -> ghanix
+easykubenix     -> nanopynix vivarium
+nixkube         -> easykubenix ghanix vivarium
 ```
 
 The apparent `nanopynix -> easykubenix` edge is a test fixture,
@@ -253,9 +253,9 @@ names, cross-checked by hand for the one case a text search cannot settle:
 ```
 ghanix, pynixd, umbrella, flake-compatish   (use no sibling)
 nanopynix                                    (uses no sibling)
-user-mode-nixos -> ghanix
-easykubenix     -> nanopynix user-mode-nixos
-nixkube         -> easykubenix ghanix user-mode-nixos
+vivarium        -> ghanix
+easykubenix     -> nanopynix vivarium
+nixkube         -> easykubenix ghanix vivarium
 ```
 
 Take the reverse closure and a landing triggers this much:
@@ -264,12 +264,12 @@ Take the reverse closure and a landing triggers this much:
 | --- | --- | --- |
 | `easykubenix` | easykubenix, nixkube | 6 of 8 |
 | `flake-compatish` | flake-compatish | 7 of 8 |
-| `ghanix` | easykubenix, ghanix, nixkube, user-mode-nixos | 4 of 8 |
+| `ghanix` | easykubenix, ghanix, nixkube, vivarium | 4 of 8 |
 | `nanopynix` | easykubenix, nanopynix, nixkube | 5 of 8 |
 | `nixkube` | nixkube | 7 of 8 |
 | `pynixd` | pynixd | 7 of 8 |
 | `umbrella` | umbrella | 7 of 8 |
-| `user-mode-nixos` | easykubenix, nixkube, user-mode-nixos | 5 of 8 |
+| `vivarium` | easykubenix, nixkube, vivarium | 5 of 8 |
 
 **A `nanopynix` change does not run `pynixd`.** The worst case is `ghanix`,
 at four of eight, and half the projects trigger themselves alone.
