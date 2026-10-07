@@ -411,7 +411,8 @@ neither run can see the other. Two answers:
 
 ### 3. Landing
 
-`umbrella land` pushes the working copies and locks what was pushed. Then,
+`umbrella land <name>...` pushes the named working copies and locks what was
+pushed. Then,
 once that lock is committed and pushed, `umbrella mark` publishes one ref per
 locked revision. No child gains a commit.
 

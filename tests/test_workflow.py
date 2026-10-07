@@ -19,7 +19,7 @@ def _git(checkout: Checkout, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _land_and_publish(checkout: Checkout, message: str) -> None:
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
     checkout.publish_umbrella(message)
 
 
@@ -30,7 +30,7 @@ def test_land_publishes_the_commit_and_locks_it(checkout: Checkout) -> None:
     checkout.edit("sub1", "v2")
     landed = checkout.commit("sub1", "v2")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     assert checkout.locked("sub1") == landed
     on_origin = run("git", "rev-parse", "origin/main", cwd=checkout.at("sub1")).strip()
@@ -43,7 +43,7 @@ def test_land_publishes_every_source_that_moved(checkout: Checkout) -> None:
         checkout.edit(name, "v2")
         landed[name] = checkout.commit(name, "v2")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     for name, oid in landed.items():
         assert checkout.locked(name) == oid
@@ -54,7 +54,7 @@ def test_land_leaves_alone_what_did_not_move(checkout: Checkout) -> None:
     checkout.edit("sub1", "v2")
     checkout.commit("sub1", "v2")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     assert checkout.locked("sub2") == before
 
@@ -62,7 +62,7 @@ def test_land_leaves_alone_what_did_not_move(checkout: Checkout) -> None:
 def test_land_does_nothing_when_there_is_nothing_to_land(
     checkout: Checkout, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
     assert "nothing to land" in capsys.readouterr().out
 
 
@@ -88,13 +88,13 @@ def test_land_says_the_lock_is_unwritten_when_the_prefetch_fails(
 
     monkeypatch.setattr(nixcli, "prefetch", refuse)
 
-    assert checkout.cli("land") == 1
+    assert checkout.cli("land", "--all") == 1
 
     said = capsys.readouterr().err
     assert "pushed and public" in said
     assert landed[:SHORT_ID] in said
     assert lock.PATH in said
-    assert "land` again" in said
+    assert "land sub1` again" in said
 
     # And it really did stop there: the source is out and the lock is not.
     assert checkout.locked("sub1") != landed
@@ -104,9 +104,85 @@ def test_land_refuses_to_move_anything_with_no_advance(checkout: Checkout) -> No
     checkout.edit("sub1", "v2")
     landed = checkout.commit("sub1", "v2")
 
-    assert checkout.cli("land", "--no-advance") == 1
+    assert checkout.cli("land", "--all", "--no-advance") == 1
 
     assert checkout.locked("sub1") != landed
+
+
+def _on_origin(lab: Lab, source: str) -> str:
+    return run("git", "rev-parse", "main", cwd=lab.origin(source)).strip()
+
+
+def test_land_touches_only_the_sources_it_names(checkout: Checkout, lab: Lab) -> None:
+    """Another session's uncommitted work does not block this one, nor ship.
+
+    Lillecarl/umbrella#3.
+    """
+    checkout.edit("sub1", "v2")
+    landed = checkout.commit("sub1", "v2")
+    checkout.edit("sub2", "v2")
+    checkout.commit("sub2", "v2")
+    checkout.edit("sub2", "half done")
+    theirs, their_lock = _on_origin(lab, "sub2"), checkout.locked("sub2")
+
+    assert checkout.cli("land", "sub1") == 0
+
+    assert checkout.locked("sub1") == landed
+    assert _on_origin(lab, "sub2") == theirs
+    assert checkout.locked("sub2") == their_lock
+
+
+def test_land_pushes_nothing_when_one_named_source_refuses(
+    checkout: Checkout, lab: Lab
+) -> None:
+    """sub1 sorts first, so a check that ran per push would publish it."""
+    checkout.edit("sub1", "v2")
+    checkout.commit("sub1", "v2")
+    checkout.edit("sub2", "v2")
+    checkout.commit("sub2", "v2")
+    checkout.edit("sub2", "half done")
+    before = _on_origin(lab, "sub1")
+
+    assert checkout.cli("land", "sub1", "sub2") == 1
+
+    assert _on_origin(lab, "sub1") == before
+
+
+def test_land_with_no_names_refuses_and_says_what_moved(
+    checkout: Checkout, lab: Lab, capsys: pytest.CaptureFixture[str]
+) -> None:
+    checkout.edit("sub1", "v2")
+    checkout.commit("sub1", "v2")
+    before = _on_origin(lab, "sub1")
+
+    assert checkout.cli("land") == 1
+
+    said = capsys.readouterr().err
+    assert "--all" in said
+    assert "sub1" in said
+    assert _on_origin(lab, "sub1") == before
+
+
+def test_land_refuses_a_name_the_lock_does_not_hold(checkout: Checkout) -> None:
+    assert checkout.cli("land", "nosuch") == 1
+
+
+@needs_jj
+def test_land_leaves_an_unnamed_working_commit_open(jj_checkout: Checkout) -> None:
+    """finalize closes a described @, which is a rewrite of somebody's work."""
+    jj_checkout.edit("sub1", "v2")
+    jj_checkout.commit("sub1", "v2")
+    jj_checkout.edit("sub2", "v2")
+    jj_checkout.jj("sub2", "describe", "-m", "theirs, unfinished")
+    before = jj_checkout.head_of("sub2")
+
+    assert jj_checkout.cli("land", "sub1") == 0
+
+    assert jj_checkout.head_of("sub2") == before
+    described = jj_checkout.jj(
+        "sub2", "log", "--no-graph", "-r", "@", "-T", "description"
+    )
+    assert described.strip() == "theirs, unfinished"
 
 
 def test_land_leaves_the_umbrella_commit_to_the_person(checkout: Checkout) -> None:
@@ -114,7 +190,7 @@ def test_land_leaves_the_umbrella_commit_to_the_person(checkout: Checkout) -> No
     checkout.edit("sub1", "v2")
     checkout.commit("sub1", "v2")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     assert lock.PATH in checkout.git("status", "--porcelain")
 
@@ -129,7 +205,7 @@ def test_land_from_a_detached_git_checkout_creates_the_branch(
     git_checkout.edit("sub1", "v2")
     landed = git_checkout.commit_git("sub1", "v2")
 
-    assert git_checkout.cli("land") == 0
+    assert git_checkout.cli("land", "--all") == 0
 
     assert git_checkout.locked("sub1") == landed
     assert run("git", "rev-parse", "main", cwd=source).strip() == landed
@@ -296,7 +372,7 @@ def test_land_closes_a_described_working_commit(jj_checkout: Checkout) -> None:
         "sub1", "log", "--no-graph", "-r", "@", "-T", "commit_id"
     ).strip()
 
-    assert jj_checkout.cli("land") == 0
+    assert jj_checkout.cli("land", "--all") == 0
 
     assert jj_checkout.locked("sub1") == landed
     # The published commit must not still be the working copy, or the next
@@ -315,7 +391,7 @@ def test_land_leaves_an_undescribed_working_commit_alone(
     before = jj_checkout.locked("sub1")
     jj_checkout.edit("sub1", "v2")
 
-    assert jj_checkout.cli("land") == 0
+    assert jj_checkout.cli("land", "--all") == 0
 
     assert jj_checkout.locked("sub1") == before
     assert "no description" in capsys.readouterr().out
@@ -328,7 +404,7 @@ def test_land_leaves_an_empty_described_working_commit_alone(
     before = jj_checkout.locked("sub1")
     jj_checkout.jj("sub1", "describe", "-m", "a message and nothing else")
 
-    assert jj_checkout.cli("land") == 0
+    assert jj_checkout.cli("land", "--all") == 0
 
     assert jj_checkout.locked("sub1") == before
 
@@ -360,7 +436,7 @@ def test_land_never_closes_a_conflicted_working_commit(
     run("jj", "--no-pager", "-R", source, "describe", "-m", "a described conflict")
 
     before = jj_checkout.locked("sub1")
-    assert jj_checkout.cli("land") == 1
+    assert jj_checkout.cli("land", "--all") == 1
     assert jj_checkout.locked("sub1") == before
 
 

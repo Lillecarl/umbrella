@@ -68,7 +68,8 @@ def _hints(backend: Backend, sources: list[Source]) -> None:
     print("\n  Push the source first:", file=sys.stderr)
     for source in sources:
         print(f"    {backend.hint(source)}", file=sys.stderr)
-    print("  Or let umbrella do it:  umbrella land", file=sys.stderr)
+    names = " ".join(source.name for source in sources)
+    print(f"  Or let umbrella do it:  umbrella land {names}", file=sys.stderr)
 
 
 def _needs_umbrella(umbrella: Umbrella, what: str) -> None:
@@ -715,8 +716,37 @@ def _write_pin(
     return moved
 
 
+def _selected(umbrella: Umbrella, args) -> list[Source]:
+    """The sources this run may touch: the named ones, or every one with --all.
+
+    Never a default of all. Two sessions working on separate sources share
+    this checkout and know nothing of each other, so a run that walked every
+    source would push one session's work, or refuse over its uncommitted
+    edits, on behalf of the other. Lillecarl/umbrella#3.
+    """
+    sources = {s.name: s for s in umbrella.sources()}
+    if args.all:
+        return [s for s in sources.values() if s.present]
+    if not args.names:
+        moved = sorted(
+            s.name
+            for s in sources.values()
+            if s.present and (head := s.head()) is not None and head != s.locked
+        )
+        hint = f" Ahead of the lock: {', '.join(moved)}." if moved else ""
+        _die(f"name the sources to land, or pass --all.{hint}")
+    wanted = sorted(set(args.names))
+    unknown = [name for name in wanted if name not in sources]
+    if unknown:
+        _die(f"{lock.PATH} names no {', '.join(unknown)}")
+    absent = [name for name in wanted if not sources[name].present]
+    if absent:
+        _die(f"no working copy of {', '.join(absent)} here, so it has nothing to land")
+    return [sources[name] for name in wanted]
+
+
 def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
-    """Push each working copy, then lock the sources at what was pushed."""
+    """Push each named working copy, then lock those sources at what was pushed."""
     _needs_umbrella(umbrella, "land")
     name = wts.read(umbrella.markers)
     if name is not None:
@@ -724,14 +754,13 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
             f"this is the worktreespace {name}, which is for throwaway work, so "
             "it does not publish. Land from the checkout it came from."
         )
+    selected = _selected(umbrella, args)
 
-    declared = _declared_branches(umbrella)
-    # --no-advance means this run rewrites nothing, and the pin is a rewrite.
-    pin_revision = None if args.no_advance else _pin_revision(umbrella)
-    landed: dict[str, str] = {}
-    for source in umbrella.sources():
-        if not source.present:
-            continue
+    # Every check, for every source, before the first push. A push cannot be
+    # taken back, so a refusal after one leaves a source public and the lock
+    # never written.
+    pending: list[tuple[Source, Oid]] = []
+    for source in selected:
         if not args.no_advance and backend.finalize(source):
             print(f"{source.name:<{NAME_COLUMN}} closed the working commit")
         head = source.head()
@@ -746,11 +775,15 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
             _die(f"{source.name}: has unresolved conflicts. Resolve them first.")
         if backend.dirty(source):
             _die(f"{source.name}: has uncommitted work. Commit it first.")
+        pending.append((source, head))
 
-        # After the two guards above, because it rewrites the commit, and
-        # before the branch is chosen, because that rewrite moves it.
+    declared = _declared_branches(umbrella)
+    # --no-advance means this run rewrites nothing, and the pin is a rewrite.
+    pin_revision = None if args.no_advance or not pending else _pin_revision(umbrella)
+    ready: list[tuple[Source, Oid, refs.Choice]] = []
+    for source, head in pending:
+        # Before the branch is chosen, because this rewrite moves the commit.
         head = _write_pin(backend, source, head, pin_revision)
-
         try:
             choice = refs.choose(
                 source, head, backend.default_branch(source), declared.get(source.name)
@@ -758,13 +791,16 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
         except refs.NoBranch as error:
             _die(str(error))
             raise
+        if choice.needs_move and args.no_advance:
+            _die(
+                f"{source.name}: {choice.name} does not point at the commit to "
+                "land, and --no-advance forbids moving it."
+            )
+        ready.append((source, head, choice))
 
+    landed: dict[str, str] = {}
+    for source, head, choice in ready:
         if choice.needs_move:
-            if args.no_advance:
-                _die(
-                    f"{source.name}: {choice.name} does not point at the commit to "
-                    "land, and --no-advance forbids moving it."
-                )
             was = str(choice.target)[:SHORT_ID] if choice.target else "new"
             backend.advance(source, choice.name, choice.target is not None, head)
             print(
@@ -804,8 +840,9 @@ def cmd_land(umbrella: Umbrella, backend: Backend, args) -> int:
             f"{error}\n\n"
             f"  pushed and public: {pushed}\n"
             f"  {lock.PATH} is NOT written, so nothing here is finished.\n"
-            "  Run `umbrella land` again. It pushes nothing twice, and a\n"
-            "  502 or 504 from the forge is worth waiting a minute for.\n"
+            f"  Run `umbrella land {' '.join(sorted(landed))}` again. It pushes\n"
+            "  nothing twice, and a 502 or 504 from the forge is worth\n"
+            "  waiting a minute for.\n"
             "  Do not commit the umbrella until it says it wrote the lock."
         )
         raise
@@ -1006,12 +1043,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     land = sub.add_parser(
         "land",
-        help="push the working copies, then lock the sources at what was pushed",
+        help="push the named working copies, then lock them at what was pushed",
         description=(
+            "Name the sources to land, or pass --all. Only those are pushed, "
+            "and every check passes for all of them before the first push. "
             "This writes nix/sources.lock and stops. Committing the umbrella is "
             "left to you, because git and jj want different commands for it and "
             "picking one here would be wrong in the other."
         ),
+    )
+    land.add_argument("names", nargs="*", help="source names")
+    land.add_argument(
+        "--all", action="store_true", help="every source with a working copy here"
     )
     land.add_argument(
         "--no-advance",

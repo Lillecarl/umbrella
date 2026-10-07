@@ -32,7 +32,7 @@ def test_status_says_there_is_nothing_to_track(
 
 
 def test_land_refuses_on_a_single_project(single: Checkout) -> None:
-    assert single.cli("land") == 1
+    assert single.cli("land", "--all") == 1
 
 
 def test_sync_refuses_on_a_single_project(single: Checkout) -> None:

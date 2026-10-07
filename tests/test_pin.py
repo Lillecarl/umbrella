@@ -40,7 +40,7 @@ def test_land_writes_the_pin_into_the_commit_it_publishes(checkout: Checkout) ->
     adopted = _adopt(checkout, "sub1")
     before = _commits(checkout, "sub1")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     head = checkout.head_of("sub1")
     assert head != adopted, "the pin belongs in the commit, so the commit changes"
@@ -56,7 +56,7 @@ def test_land_keeps_the_message_of_the_commit_it_pins(checkout: Checkout) -> Non
     checkout.edit("sub1", "v2")
     checkout.commit("sub1", "v2")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     said = run("git", "log", "-1", "--format=%s", cwd=checkout.at("sub1")).strip()
     assert said == "v2"
@@ -67,7 +67,7 @@ def test_land_creates_no_pin_where_a_source_carries_none(checkout: Checkout) -> 
     checkout.edit("sub1", "v2")
     landed = checkout.commit("sub1", "v2")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     assert checkout.head_of("sub1") == landed
     assert not pin.carried_by(checkout.at("sub1"))
@@ -78,7 +78,7 @@ def test_land_rewrites_nothing_when_the_pin_already_matches(
 ) -> None:
     landed = _adopt(checkout, "sub1", _umbrella_head(checkout))
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     assert checkout.head_of("sub1") == landed
     assert checkout.locked("sub1") == landed
@@ -94,7 +94,7 @@ def test_land_leaves_a_published_commit_alone(
     landed = _adopt(checkout, "sub1")
     checkout.publish("sub1")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     assert checkout.head_of("sub1") == landed
     assert _pinned(checkout, "sub1") == ZERO
@@ -112,7 +112,7 @@ def test_land_writes_no_pin_nobody_can_fetch(
     landed = _adopt(checkout, "sub1")
     checkout.git("commit", "--allow-empty", "--no-verify", "-q", "-m", "not pushed")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     assert checkout.head_of("sub1") == landed
     assert _pinned(checkout, "sub1") == ZERO
@@ -124,7 +124,7 @@ def test_land_writes_no_pin_with_no_advance(checkout: Checkout) -> None:
     landed = _adopt(checkout, "sub1")
     checkout.publish("sub1")
 
-    assert checkout.cli("land", "--no-advance") == 0
+    assert checkout.cli("land", "--all", "--no-advance") == 0
 
     assert checkout.head_of("sub1") == landed
     assert _pinned(checkout, "sub1") == ZERO
@@ -147,7 +147,7 @@ def test_land_pins_a_colocated_source_in_git_mode(git_checkout: Checkout) -> Non
     run("jj", "--no-pager", "-R", str(source), "commit", "-m", "adopt the pin")
     before = _commits(git_checkout, "sub1")
 
-    assert git_checkout.cli("land") == 0
+    assert git_checkout.cli("land", "--all") == 0
 
     assert _pinned(git_checkout, "sub1") == _umbrella_head(git_checkout)
     assert _commits(git_checkout, "sub1") == before
@@ -192,7 +192,7 @@ def test_land_pins_under_a_described_working_commit(jj_checkout: Checkout) -> No
     _adopt(jj_checkout, "sub1")
     jj_checkout.jj("sub1", "describe", "-m", "work in progress")
 
-    assert jj_checkout.cli("land") == 0
+    assert jj_checkout.cli("land", "--all") == 0
 
     assert _pinned(jj_checkout, "sub1") == _umbrella_head(jj_checkout)
     said = jj_checkout.jj(

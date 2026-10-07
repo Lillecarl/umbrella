@@ -324,7 +324,7 @@ def test_land_writes_the_lock_for_what_it_pushed(
     checkout.edit("sub1", "v2")
     landed = checkout.commit("sub1", "v2")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     assert checkout.locked("sub1") == landed
     assert "(landed)" in capsys.readouterr().out
@@ -339,7 +339,7 @@ def test_land_leaves_a_source_it_did_not_push_alone(
     checkout.edit("sub1", "v2")
     checkout.commit("sub1", "v2")
 
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
 
     assert checkout.locked("sub2") == before != moved
 

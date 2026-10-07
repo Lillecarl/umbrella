@@ -40,7 +40,7 @@ def test_an_umbrella_worktree_does_not_publish(checkout: Checkout) -> None:
     assert checkout.cli("wts", "add", "poc") == 0
     inside = Checkout(_wts_path(checkout, "poc"))
 
-    assert inside.cli("land") == 1
+    assert inside.cli("land", "--all") == 1
 
 
 def test_a_worktree_cannot_spawn_another(checkout: Checkout) -> None:
@@ -99,7 +99,7 @@ def test_a_wts_can_be_made_from_an_older_umbrella_commit(checkout: Checkout) -> 
     was = checkout.locked("sub1")
     checkout.edit("sub1", "v2")
     checkout.commit("sub1", "v2")
-    assert checkout.cli("land") == 0
+    assert checkout.cli("land", "--all") == 0
     checkout.publish_umbrella("bump sub1")
     assert checkout.locked("sub1") != was
 
@@ -217,7 +217,7 @@ def test_a_jj_umbrella_worktreespace_does_not_publish(jj_umbrella: Checkout) -> 
     tree = _wts_path(jj_umbrella, "poc")
 
     made = Checkout(path=tree)
-    assert made.cli("land") != 0
+    assert made.cli("land", "--all") != 0
 
 
 @needs_jj
